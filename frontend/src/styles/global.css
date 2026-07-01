@@ -150,6 +150,7 @@ main {
 }
 
 .camera-card__toolbar,
+.camera-card__status-group,
 .camera-card__actions,
 .camera-card__footer {
   display: flex;
@@ -162,6 +163,7 @@ main {
   gap: 0.75rem;
 }
 
+.camera-card__status-group,
 .camera-card__actions {
   gap: 0.65rem;
   flex-wrap: wrap;
@@ -194,6 +196,11 @@ main {
   color: #7d1f1f;
 }
 
+.camera-badge--overlay {
+  background: rgba(255, 244, 232, 0.92);
+  color: #8c4f25;
+}
+
 .camera-stage {
   position: relative;
   min-height: 22rem;
@@ -203,14 +210,26 @@ main {
   background: linear-gradient(135deg, rgba(210, 95, 43, 0.18), rgba(0, 0, 0, 0.08));
 }
 
-.camera-feed {
+.camera-feed,
+.camera-canvas {
   width: 100%;
   min-height: 22rem;
+}
+
+.camera-feed {
+  display: block;
   object-fit: cover;
   background: rgba(255, 255, 255, 0.18);
 }
 
-.camera-feed--mirrored {
+.camera-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.camera-feed--mirrored,
+.camera-canvas--mirrored {
   transform: scaleX(-1);
 }
 
@@ -244,5 +263,11 @@ main {
   .hero,
   .studio__grid {
     grid-template-columns: 1fr;
+  }
+
+  .camera-card__toolbar,
+  .camera-card__footer {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

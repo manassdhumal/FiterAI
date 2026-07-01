@@ -1,6 +1,7 @@
 ﻿import { useEffect, useRef } from "react";
 
 import { useCamera } from "../hooks/useCamera";
+import { usePoseOverlay } from "../hooks/usePoseOverlay";
 
 const statusCopy = {
   error: "Camera unavailable",
@@ -13,6 +14,10 @@ export function CameraPreview() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
+  const { canvasRef, overlayMode } = usePoseOverlay({
+    enabled: status === "live",
+    videoRef
+  });
 
   useEffect(() => {
     if (!videoRef.current) {
@@ -25,7 +30,10 @@ export function CameraPreview() {
   return (
     <div className="camera-card">
       <div className="camera-card__toolbar">
-        <span className={`camera-badge camera-badge--${status}`}>{statusCopy[status]}</span>
+        <div className="camera-card__status-group">
+          <span className={`camera-badge camera-badge--${status}`}>{statusCopy[status]}</span>
+          <span className="camera-badge camera-badge--overlay">{overlayMode} overlay</span>
+        </div>
         <div className="camera-card__actions">
           <button type="button" onClick={toggleMirror} className="button--ghost">
             {isMirrored ? "Mirror on" : "Mirror off"}
@@ -50,6 +58,10 @@ export function CameraPreview() {
           playsInline
           className={isMirrored ? "camera-feed camera-feed--mirrored" : "camera-feed"}
         />
+        <canvas
+          ref={canvasRef}
+          className={isMirrored ? "camera-canvas camera-canvas--mirrored" : "camera-canvas"}
+        />
         {status !== "live" ? (
           <div className="camera-overlay">
             <div>
@@ -66,7 +78,9 @@ export function CameraPreview() {
       </div>
 
       <div className="camera-card__footer">
-        <p>Next step: draw pose landmarks and garment anchors on top of this feed.</p>
+        <p>
+          The overlay is currently a body-fitting scaffold so we can plug in real pose tracking next.
+        </p>
       </div>
     </div>
   );
