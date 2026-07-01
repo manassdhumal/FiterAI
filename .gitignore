@@ -7,3 +7,5 @@ __pycache__/
 frontend/.vite/
 backend/.pytest_cache/
 data/
+*.md
+docs/
