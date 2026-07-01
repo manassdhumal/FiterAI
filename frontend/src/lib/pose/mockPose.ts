@@ -1,19 +1,5 @@
-﻿import type { PoseConnection, PoseFrame, PoseLandmark, PoseLandmarkId } from "./types";
-
-const connections: PoseConnection[] = [
-  ["leftShoulder", "rightShoulder"],
-  ["leftShoulder", "leftElbow"],
-  ["leftElbow", "leftWrist"],
-  ["rightShoulder", "rightElbow"],
-  ["rightElbow", "rightWrist"],
-  ["leftShoulder", "leftHip"],
-  ["rightShoulder", "rightHip"],
-  ["leftHip", "rightHip"],
-  ["leftHip", "leftKnee"],
-  ["leftKnee", "leftAnkle"],
-  ["rightHip", "rightKnee"],
-  ["rightKnee", "rightAnkle"]
-];
+﻿import { poseConnections } from "./connections";
+import type { PoseFrame, PoseLandmark, PoseLandmarkId } from "./types";
 
 function createLandmark(
   id: PoseLandmarkId,
@@ -55,7 +41,7 @@ export function estimateMockPoseFrame(video: HTMLVideoElement, timestamp: number
   ];
 
   return {
-    connections,
+    connections: poseConnections,
     landmarks
   };
 }

@@ -14,7 +14,7 @@ export function CameraPreview() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
-  const { canvasRef, overlayMode } = usePoseOverlay({
+  const { canvasRef, detectorMessage, overlayMode } = usePoseOverlay({
     enabled: status === "live",
     videoRef
   });
@@ -78,9 +78,7 @@ export function CameraPreview() {
       </div>
 
       <div className="camera-card__footer">
-        <p>
-          The overlay is currently a body-fitting scaffold so we can plug in real pose tracking next.
-        </p>
+        <p>{detectorMessage}</p>
       </div>
     </div>
   );
