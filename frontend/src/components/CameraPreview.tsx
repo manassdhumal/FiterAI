@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type FitAdjustments } from "../lib/pose/garmentFit";
 import { useCamera } from "../hooks/useCamera";
@@ -10,6 +10,11 @@ type CameraPreviewProps = {
   garmentSrc: string | null;
 };
 
+type SnapshotState = {
+  createdAt: string;
+  src: string;
+};
+
 const statusCopy = {
   error: "Camera unavailable",
   idle: "Camera offline",
@@ -19,6 +24,7 @@ const statusCopy = {
 
 export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [snapshot, setSnapshot] = useState<SnapshotState | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
   const { canvasRef, detectorMessage, garmentMessage, overlayMode } = usePoseOverlay({
@@ -36,6 +42,69 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
     videoRef.current.srcObject = streamRef.current;
   }, [status, streamRef]);
 
+  useEffect(() => {
+    return () => {
+      if (snapshot?.src) {
+        URL.revokeObjectURL(snapshot.src);
+      }
+    };
+  }, [snapshot]);
+
+  const captureLook = () => {
+    const video = videoRef.current;
+    const overlayCanvas = canvasRef.current;
+
+    if (!video || !overlayCanvas) {
+      return;
+    }
+
+    const width = video.videoWidth || video.clientWidth;
+    const height = video.videoHeight || video.clientHeight;
+
+    if (!width || !height) {
+      return;
+    }
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = width;
+    exportCanvas.height = height;
+    const context = exportCanvas.getContext("2d");
+
+    if (!context) {
+      return;
+    }
+
+    if (isMirrored) {
+      context.translate(width, 0);
+      context.scale(-1, 1);
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    context.drawImage(overlayCanvas, 0, 0, width, height);
+
+    exportCanvas.toBlob((blob) => {
+      if (!blob) {
+        return;
+      }
+
+      setSnapshot((current) => {
+        if (current?.src) {
+          URL.revokeObjectURL(current.src);
+        }
+
+        return {
+          createdAt: new Date().toLocaleString(),
+          src: URL.createObjectURL(blob)
+        };
+      });
+    }, "image/png");
+  };
+
+  const snapshotFileName = useMemo(() => {
+    const base = garmentName ? garmentName.replace(/\.[^.]+$/, "") : "fitcheck-look";
+    return `${base}-capture.png`;
+  }, [garmentName]);
+
   return (
     <div className="camera-card">
       <div className="camera-card__toolbar">
@@ -46,6 +115,9 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
         <div className="camera-card__actions">
           <button type="button" onClick={toggleMirror} className="button--ghost">
             {isMirrored ? "Mirror on" : "Mirror off"}
+          </button>
+          <button type="button" onClick={captureLook} disabled={status !== "live"}>
+            Capture Look
           </button>
           {status === "live" ? (
             <button type="button" onClick={stopCamera}>
@@ -90,6 +162,21 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
         <p>{detectorMessage}</p>
         <p>{garmentName ? `Loaded garment: ${garmentName}` : garmentMessage}</p>
       </div>
+
+      {snapshot ? (
+        <div className="snapshot-card">
+          <div className="snapshot-card__header">
+            <div>
+              <strong>Saved look preview</strong>
+              <p>{snapshot.createdAt}</p>
+            </div>
+            <a href={snapshot.src} download={snapshotFileName} className="snapshot-download">
+              Download PNG
+            </a>
+          </div>
+          <img src={snapshot.src} alt="Captured try-on look" className="snapshot-card__image" />
+        </div>
+      ) : null}
     </div>
   );
 }

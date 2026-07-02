@@ -23,7 +23,8 @@ body {
     linear-gradient(180deg, #f7f0e8 0%, #efe4d6 100%);
 }
 
-button {
+button,
+.snapshot-download {
   border: none;
   border-radius: 999px;
   padding: 0.9rem 1.4rem;
@@ -31,6 +32,7 @@ button {
   cursor: pointer;
   background: var(--accent);
   color: white;
+  text-decoration: none;
 }
 
 button:disabled {
@@ -250,13 +252,15 @@ main {
 .camera-card__toolbar,
 .camera-card__status-group,
 .camera-card__actions,
-.camera-card__footer {
+.camera-card__footer,
+.snapshot-card__header {
   display: flex;
   align-items: center;
 }
 
 .camera-card__toolbar,
-.camera-card__footer {
+.camera-card__footer,
+.snapshot-card__header {
   justify-content: space-between;
   gap: 0.75rem;
 }
@@ -349,17 +353,41 @@ main {
 
 .camera-overlay p,
 .camera-overlay span,
-.camera-card__footer p {
+.camera-card__footer p,
+.snapshot-card__header p {
   margin: 0;
 }
 
-.camera-overlay strong {
+.camera-overlay strong,
+.snapshot-card__header strong {
   display: block;
   margin-bottom: 0.4rem;
 }
 
 .camera-card__footer {
   color: var(--muted);
+}
+
+.snapshot-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 250, 244, 0.86);
+}
+
+.snapshot-card__image {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.snapshot-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 900px) {
@@ -370,7 +398,8 @@ main {
 
   .camera-card__toolbar,
   .camera-card__footer,
-  .fit-controls__header {
+  .fit-controls__header,
+  .snapshot-card__header {
     align-items: flex-start;
     flex-direction: column;
   }
