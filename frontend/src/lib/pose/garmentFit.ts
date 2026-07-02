@@ -63,8 +63,26 @@ export const garmentMeshRowIndexPairs: [number, number][] = [
 // proportions (shoulderLift/sleeveDrop/waist-inset/hip offsets).
 export const garmentMeshRowSourceFractions = [0, 0.11, 0.29, 0.83, 1];
 
+const ELBOW_CONFIDENCE_THRESHOLD = 0.5;
+const SLEEVE_ELBOW_REACH_RATIO = 0.6;
+
 function byId(frame: PoseFrame, id: PoseLandmark["id"]) {
   return frame.landmarks.find((landmark) => landmark.id === id) ?? null;
+}
+
+// Anchors the sleeve hem toward the real elbow direction/distance instead of
+// a fixed shoulder-relative offset, so a raised or outstretched arm actually
+// moves the sleeve. Falls back to the fixed offset when the elbow isn't
+// confidently visible (e.g. tight upper-body framing).
+function resolveSleevePoint(shoulder: Point, elbow: PoseLandmark | null, fallback: Point): Point {
+  if (elbow && elbow.confidence >= ELBOW_CONFIDENCE_THRESHOLD) {
+    return {
+      x: shoulder.x + (elbow.x - shoulder.x) * SLEEVE_ELBOW_REACH_RATIO,
+      y: shoulder.y + (elbow.y - shoulder.y) * SLEEVE_ELBOW_REACH_RATIO
+    };
+  }
+
+  return fallback;
 }
 
 function rotatePoint(point: Point, center: Point, radians: number): Point {
@@ -84,6 +102,8 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const rightShoulder = byId(frame, "rightShoulder");
   const leftHip = byId(frame, "leftHip");
   const rightHip = byId(frame, "rightHip");
+  const leftElbow = byId(frame, "leftElbow");
+  const rightElbow = byId(frame, "rightElbow");
 
   if (!leftShoulder || !rightShoulder || !leftHip || !rightHip) {
     return null;
@@ -115,8 +135,14 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
     neckLeft: { x: centerX - neckInset, y: leftShoulder.y - shoulderLift },
     neckRight: { x: centerX + neckInset, y: rightShoulder.y - shoulderLift },
     rightShoulder: { x: rightShoulder.x + shoulderWidth * 0.08, y: rightShoulder.y + shoulderLift },
-    sleeveLeft: { x: leftShoulder.x - sleeveReach, y: leftShoulder.y + sleeveDrop },
-    sleeveRight: { x: rightShoulder.x + sleeveReach, y: rightShoulder.y + sleeveDrop },
+    sleeveLeft: resolveSleevePoint(leftShoulder, leftElbow, {
+      x: leftShoulder.x - sleeveReach,
+      y: leftShoulder.y + sleeveDrop
+    }),
+    sleeveRight: resolveSleevePoint(rightShoulder, rightElbow, {
+      x: rightShoulder.x + sleeveReach,
+      y: rightShoulder.y + sleeveDrop
+    }),
     waistInset: shoulderWidth * 0.12,
     width: shoulderWidth
   };
