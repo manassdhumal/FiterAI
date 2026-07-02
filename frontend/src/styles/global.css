@@ -79,14 +79,20 @@ main {
 }
 
 .hero__copy h1,
-.studio__header h2 {
+.studio__header h2,
+.saved-looks h3 {
   font-size: clamp(2.4rem, 4vw, 4.6rem);
   line-height: 0.96;
   margin: 0 0 1rem;
 }
 
+.saved-looks h3 {
+  font-size: clamp(1.4rem, 2vw, 2rem);
+}
+
 .hero__text,
-.panel__subtitle {
+.panel__subtitle,
+.saved-looks__empty {
   color: var(--muted);
   line-height: 1.6;
 }
@@ -96,7 +102,8 @@ main {
   font-size: 1.05rem;
 }
 
-.panel__subtitle {
+.panel__subtitle,
+.saved-looks__empty {
   margin-top: 0;
 }
 
@@ -142,11 +149,13 @@ main {
   gap: 1rem;
 }
 
-.panel {
+.panel,
+.saved-looks {
   padding: 1.2rem;
 }
 
-.panel h3 {
+.panel h3,
+.saved-looks__header {
   margin-top: 0;
 }
 
@@ -206,7 +215,8 @@ main {
   margin: 0;
 }
 
-.fit-controls__header {
+.fit-controls__header,
+.saved-looks__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -214,12 +224,14 @@ main {
   margin-bottom: 1rem;
 }
 
-.fit-controls {
+.fit-controls,
+.saved-looks__grid {
   display: grid;
   gap: 0.9rem;
 }
 
-.fit-control {
+.fit-control,
+.saved-look-card {
   display: grid;
   gap: 0.45rem;
   padding: 0.85rem 0.9rem;
@@ -228,7 +240,9 @@ main {
   border: 1px solid var(--border);
 }
 
-.fit-control__row {
+.fit-control__row,
+.saved-look-card__actions,
+.saved-look-card__meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -236,7 +250,9 @@ main {
 }
 
 .fit-control__row span,
-.fit-control__row strong {
+.fit-control__row strong,
+.saved-look-card__meta p,
+.saved-look-card__meta strong {
   margin: 0;
 }
 
@@ -354,18 +370,36 @@ main {
 .camera-overlay p,
 .camera-overlay span,
 .camera-card__footer p,
-.snapshot-card__header p {
+.snapshot-card__header p,
+.saved-look-card__meta p {
   margin: 0;
 }
 
 .camera-overlay strong,
-.snapshot-card__header strong {
+.snapshot-card__header strong,
+.saved-look-card__meta strong {
   display: block;
   margin-bottom: 0.4rem;
 }
 
 .camera-card__footer {
   color: var(--muted);
+}
+
+.saved-looks__grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.saved-look-card__image,
+.snapshot-card__image {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.saved-look-card__image {
+  aspect-ratio: 3 / 4;
 }
 
 .snapshot-card {
@@ -375,13 +409,6 @@ main {
   border-radius: 18px;
   border: 1px solid var(--border);
   background: rgba(255, 250, 244, 0.86);
-}
-
-.snapshot-card__image {
-  width: 100%;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  object-fit: cover;
 }
 
 .snapshot-download {
@@ -399,6 +426,9 @@ main {
   .camera-card__toolbar,
   .camera-card__footer,
   .fit-controls__header,
+  .saved-looks__header,
+  .saved-look-card__actions,
+  .saved-look-card__meta,
   .snapshot-card__header {
     align-items: flex-start;
     flex-direction: column;

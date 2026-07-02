@@ -20,6 +20,12 @@ type GarmentAsset = {
   src: string;
 };
 
+type SavedLook = {
+  createdAt: string;
+  id: string;
+  src: string;
+};
+
 type FitControl = {
   key: keyof FitAdjustments;
   label: string;
@@ -52,14 +58,21 @@ function formatFitValue(control: FitControl, value: number) {
 export function StudioPage() {
   const [garmentAsset, setGarmentAsset] = useState<GarmentAsset | null>(null);
   const [fitAdjustments, setFitAdjustments] = useState<FitAdjustments>(defaultFitAdjustments);
+  const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
 
   useEffect(() => {
     return () => {
       if (garmentAsset?.src.startsWith("blob:")) {
         URL.revokeObjectURL(garmentAsset.src);
       }
+
+      savedLooks.forEach((savedLook) => {
+        if (savedLook.src.startsWith("blob:")) {
+          URL.revokeObjectURL(savedLook.src);
+        }
+      });
     };
-  }, [garmentAsset]);
+  }, [garmentAsset, savedLooks]);
 
   const handleGarmentChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -96,6 +109,28 @@ export function StudioPage() {
       ...current,
       [key]: value
     }));
+  };
+
+  const handleCapture = ({ createdAt, src }: { createdAt: string; src: string }) => {
+    setSavedLooks((current) => [
+      {
+        createdAt,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        src
+      },
+      ...current
+    ]);
+  };
+
+  const removeSavedLook = (id: string) => {
+    setSavedLooks((current) => {
+      const target = current.find((savedLook) => savedLook.id === id);
+      if (target?.src.startsWith("blob:")) {
+        URL.revokeObjectURL(target.src);
+      }
+
+      return current.filter((savedLook) => savedLook.id !== id);
+    });
   };
 
   return (
@@ -144,6 +179,7 @@ export function StudioPage() {
             fitAdjustments={fitAdjustments}
             garmentName={garmentAsset?.name ?? null}
             garmentSrc={garmentAsset?.src ?? null}
+            onCapture={handleCapture}
           />
         </article>
 
@@ -186,6 +222,43 @@ export function StudioPage() {
           </div>
         </article>
       </div>
+
+      <section className="saved-looks panel">
+        <div className="saved-looks__header">
+          <div>
+            <h3>Saved Looks</h3>
+            <p className="panel__subtitle">
+              Captured try-on looks stay here locally during this session so you can compare and download them.
+            </p>
+          </div>
+        </div>
+
+        {savedLooks.length === 0 ? (
+          <p className="saved-looks__empty">
+            No captured looks yet. Start the camera, try a garment, and click `Capture Look`.
+          </p>
+        ) : (
+          <div className="saved-looks__grid">
+            {savedLooks.map((savedLook, index) => (
+              <article key={savedLook.id} className="saved-look-card">
+                <img src={savedLook.src} alt={`Saved look ${index + 1}`} className="saved-look-card__image" />
+                <div className="saved-look-card__meta">
+                  <strong>Look {index + 1}</strong>
+                  <p>{savedLook.createdAt}</p>
+                </div>
+                <div className="saved-look-card__actions">
+                  <a href={savedLook.src} download={`fitcheck-look-${index + 1}.png`} className="snapshot-download">
+                    Download
+                  </a>
+                  <button type="button" className="button--ghost" onClick={() => removeSavedLook(savedLook.id)}>
+                    Remove
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </section>
   );
 }

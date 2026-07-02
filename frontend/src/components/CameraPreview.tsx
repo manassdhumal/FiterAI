@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { type FitAdjustments } from "../lib/pose/garmentFit";
 import { useCamera } from "../hooks/useCamera";
 import { usePoseOverlay } from "../hooks/usePoseOverlay";
 
+type SnapshotPayload = {
+  createdAt: string;
+  src: string;
+};
+
 type CameraPreviewProps = {
   fitAdjustments: FitAdjustments;
   garmentName: string | null;
   garmentSrc: string | null;
-};
-
-type SnapshotState = {
-  createdAt: string;
-  src: string;
+  onCapture: (snapshot: SnapshotPayload) => void;
 };
 
 const statusCopy = {
@@ -22,9 +23,13 @@ const statusCopy = {
   requesting: "Requesting access"
 } as const;
 
-export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: CameraPreviewProps) {
+export function CameraPreview({
+  fitAdjustments,
+  garmentName,
+  garmentSrc,
+  onCapture
+}: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [snapshot, setSnapshot] = useState<SnapshotState | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
   const { canvasRef, detectorMessage, garmentMessage, overlayMode } = usePoseOverlay({
@@ -41,14 +46,6 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
 
     videoRef.current.srcObject = streamRef.current;
   }, [status, streamRef]);
-
-  useEffect(() => {
-    return () => {
-      if (snapshot?.src) {
-        URL.revokeObjectURL(snapshot.src);
-      }
-    };
-  }, [snapshot]);
 
   const captureLook = () => {
     const video = videoRef.current;
@@ -87,20 +84,14 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
         return;
       }
 
-      setSnapshot((current) => {
-        if (current?.src) {
-          URL.revokeObjectURL(current.src);
-        }
-
-        return {
-          createdAt: new Date().toLocaleString(),
-          src: URL.createObjectURL(blob)
-        };
+      onCapture({
+        createdAt: new Date().toLocaleString(),
+        src: URL.createObjectURL(blob)
       });
     }, "image/png");
   };
 
-  const snapshotFileName = useMemo(() => {
+  const captureFileName = useMemo(() => {
     const base = garmentName ? garmentName.replace(/\.[^.]+$/, "") : "fitcheck-look";
     return `${base}-capture.png`;
   }, [garmentName]);
@@ -161,22 +152,8 @@ export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: Camer
       <div className="camera-card__footer camera-card__footer--stacked">
         <p>{detectorMessage}</p>
         <p>{garmentName ? `Loaded garment: ${garmentName}` : garmentMessage}</p>
+        <p>{status === "live" ? `Capture export name: ${captureFileName}` : "Camera must be live to capture."}</p>
       </div>
-
-      {snapshot ? (
-        <div className="snapshot-card">
-          <div className="snapshot-card__header">
-            <div>
-              <strong>Saved look preview</strong>
-              <p>{snapshot.createdAt}</p>
-            </div>
-            <a href={snapshot.src} download={snapshotFileName} className="snapshot-download">
-              Download PNG
-            </a>
-          </div>
-          <img src={snapshot.src} alt="Captured try-on look" className="snapshot-card__image" />
-        </div>
-      ) : null}
     </div>
   );
 }
