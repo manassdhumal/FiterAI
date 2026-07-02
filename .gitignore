@@ -10,3 +10,4 @@ data/
 *.md
 !README.md
 docs/
+.claude/settings.local.json

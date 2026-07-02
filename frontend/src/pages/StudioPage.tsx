@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import { CameraPreview } from "../components/CameraPreview";
+import { uploadGarment } from "../lib/api/garments";
 import {
   defaultFitAdjustments,
   type FitAdjustments
@@ -15,9 +16,13 @@ const garmentSources = [
   "Wardrobe item"
 ];
 
+type GarmentProcessingStatus = "error" | "processing" | "ready";
+
 type GarmentAsset = {
   name: string;
   src: string;
+  status: GarmentProcessingStatus;
+  statusMessage: string;
 };
 
 type SavedLook = {
@@ -32,6 +37,12 @@ type FitControl = {
   max: number;
   min: number;
   step: number;
+};
+
+const garmentStatusBadge: Record<GarmentProcessingStatus, string> = {
+  error: "error",
+  processing: "requesting",
+  ready: "live"
 };
 
 const fitControls: FitControl[] = [
@@ -59,6 +70,7 @@ export function StudioPage() {
   const [garmentAsset, setGarmentAsset] = useState<GarmentAsset | null>(null);
   const [fitAdjustments, setFitAdjustments] = useState<FitAdjustments>(defaultFitAdjustments);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
+  const uploadRequestIdRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -80,6 +92,8 @@ export function StudioPage() {
       return;
     }
 
+    const requestId = ++uploadRequestIdRef.current;
+
     setGarmentAsset((current) => {
       if (current?.src.startsWith("blob:")) {
         URL.revokeObjectURL(current.src);
@@ -87,14 +101,56 @@ export function StudioPage() {
 
       return {
         name: file.name,
-        src: URL.createObjectURL(file)
+        src: URL.createObjectURL(file),
+        status: "processing",
+        statusMessage: "Removing background and normalizing garment..."
       };
     });
+
+    uploadGarment(file)
+      .then((result) => {
+        if (uploadRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setGarmentAsset((current) => {
+          if (current?.src.startsWith("blob:")) {
+            URL.revokeObjectURL(current.src);
+          }
+
+          return {
+            name: file.name,
+            src: result.cleanUrl,
+            status: "ready",
+            statusMessage: result.hadTransparentSource
+              ? "Background already transparent. Garment normalized for fitting."
+              : "Background removed and garment normalized for fitting."
+          };
+        });
+      })
+      .catch((error: unknown) => {
+        if (uploadRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Garment preprocessing failed.";
+        setGarmentAsset((current) =>
+          current
+            ? {
+                ...current,
+                status: "error",
+                statusMessage: `${message} Using the original upload without background removal.`
+              }
+            : current
+        );
+      });
 
     event.target.value = "";
   };
 
   const clearGarment = () => {
+    uploadRequestIdRef.current += 1;
+
     setGarmentAsset((current) => {
       if (current?.src.startsWith("blob:")) {
         URL.revokeObjectURL(current.src);
@@ -158,7 +214,10 @@ export function StudioPage() {
               <img src={garmentAsset.src} alt={garmentAsset.name} />
               <div className="garment-preview__meta">
                 <strong>{garmentAsset.name}</strong>
-                <p>The live camera view will now project this image onto the torso fit region.</p>
+                <span className={`camera-badge camera-badge--${garmentStatusBadge[garmentAsset.status]}`}>
+                  {garmentAsset.status}
+                </span>
+                <p>{garmentAsset.statusMessage}</p>
                 <button type="button" className="button--ghost" onClick={clearGarment}>
                   Remove garment
                 </button>

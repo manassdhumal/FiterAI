@@ -1,5 +1,6 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import garments, health, renders, sessions, tryon, wardrobe
 from app.core.config import settings
@@ -12,6 +13,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.mount(
+    f"{settings.data_url_prefix}/garments",
+    StaticFiles(directory=settings.garments_dir),
+    name="garment-assets",
 )
 
 app.include_router(health.router)
