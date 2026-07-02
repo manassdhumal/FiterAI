@@ -22,7 +22,14 @@ export type PoseLandmark = {
 
 export type PoseConnection = [PoseLandmarkId, PoseLandmarkId];
 
+export type SegmentationMask = {
+  data: Float32Array;
+  height: number;
+  width: number;
+};
+
 export type PoseFrame = {
   connections: PoseConnection[];
   landmarks: PoseLandmark[];
+  segmentationMask?: SegmentationMask | null;
 };

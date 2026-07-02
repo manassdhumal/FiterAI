@@ -7,7 +7,12 @@ import {
 } from "../lib/pose/garmentFit";
 import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
-import type { PoseFrame, PoseLandmark } from "../lib/pose/types";
+import type { PoseFrame, PoseLandmark, SegmentationMask } from "../lib/pose/types";
+
+type SegmentationBuffers = {
+  bufferCanvas: HTMLCanvasElement;
+  maskCanvas: HTMLCanvasElement;
+};
 
 type UsePoseOverlayOptions = {
   enabled: boolean;
@@ -22,6 +27,7 @@ type UsePoseOverlayResult = {
   detectorMessage: string;
   garmentMessage: string;
   overlayMode: DetectorMode;
+  segmentationMessage: string;
 };
 
 function resizeCanvas(canvas: HTMLCanvasElement, video: HTMLVideoElement) {
@@ -118,6 +124,57 @@ function drawGarmentGuide(
   context.restore();
 }
 
+function paintNaturalFitGarment(
+  context: CanvasRenderingContext2D,
+  garmentImage: HTMLImageElement,
+  centerX: number,
+  centerY: number,
+  rotationRadians: number,
+  drawWidth: number,
+  drawHeight: number,
+  alpha: number
+) {
+  // The processed garment already has a transparent background, so its own
+  // alpha silhouette defines the visible shape. Contain-fit it into the
+  // guide box instead of stretching, to avoid distorting the garment.
+  const imageAspect = garmentImage.naturalWidth / garmentImage.naturalHeight || 1;
+  const boxAspect = drawWidth / drawHeight;
+  const renderWidth = imageAspect > boxAspect ? drawWidth : drawHeight * imageAspect;
+  const renderHeight = imageAspect > boxAspect ? drawWidth / imageAspect : drawHeight;
+
+  context.save();
+  context.globalAlpha = alpha;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.translate(centerX, centerY);
+  context.rotate(rotationRadians);
+  context.drawImage(garmentImage, -renderWidth / 2, -renderHeight / 2, renderWidth, renderHeight);
+  context.restore();
+}
+
+function paintSegmentationMask(maskCanvas: HTMLCanvasElement, mask: SegmentationMask) {
+  if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
+    maskCanvas.width = mask.width;
+    maskCanvas.height = mask.height;
+  }
+
+  const maskContext = maskCanvas.getContext("2d");
+  if (!maskContext) {
+    return;
+  }
+
+  const imageData = maskContext.createImageData(mask.width, mask.height);
+  for (let index = 0; index < mask.data.length; index += 1) {
+    const alpha = Math.max(0, Math.min(255, Math.round(mask.data[index] * 255)));
+    const offset = index * 4;
+    imageData.data[offset] = 255;
+    imageData.data[offset + 1] = 255;
+    imageData.data[offset + 2] = 255;
+    imageData.data[offset + 3] = alpha;
+  }
+  maskContext.putImageData(imageData, 0, 0);
+}
+
 function drawGarmentImage(
   context: CanvasRenderingContext2D,
   frame: PoseFrame,
@@ -125,7 +182,8 @@ function drawGarmentImage(
   fitAdjustments: FitAdjustments,
   scaleX: number,
   scaleY: number,
-  useNaturalGarmentShape: boolean
+  useNaturalGarmentShape: boolean,
+  segmentationBuffers: SegmentationBuffers | null
 ): boolean {
   const placement = createGarmentPlacement(frame, fitAdjustments);
 
@@ -146,37 +204,22 @@ function drawGarmentImage(
   const drawWidth = Math.max(1, maxX - minX);
   const drawHeight = Math.max(1, maxY - minY);
   const rotationRadians = (fitAdjustments.rotation * Math.PI) / 180;
-
-  context.save();
+  const centerX = placement.center.x * scaleX;
+  const centerY = placement.center.y * scaleY;
 
   if (!useNaturalGarmentShape) {
+    context.save();
     context.beginPath();
     traceGarmentPath(context, placement.points, scaleX, scaleY);
     context.clip();
-  }
-
-  context.globalAlpha = 0.92;
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.translate(placement.center.x * scaleX, placement.center.y * scaleY);
-  context.rotate(rotationRadians);
-
-  if (useNaturalGarmentShape) {
-    // The processed garment already has a transparent background, so its own
-    // alpha silhouette defines the visible shape. Contain-fit it into the
-    // guide box instead of stretching, to avoid distorting the garment.
-    const imageAspect = garmentImage.naturalWidth / garmentImage.naturalHeight || 1;
-    const boxAspect = drawWidth / drawHeight;
-    const renderWidth = imageAspect > boxAspect ? drawWidth : drawHeight * imageAspect;
-    const renderHeight = imageAspect > boxAspect ? drawWidth / imageAspect : drawHeight;
-    context.drawImage(garmentImage, -renderWidth / 2, -renderHeight / 2, renderWidth, renderHeight);
-  } else {
+    context.globalAlpha = 0.92;
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.translate(centerX, centerY);
+    context.rotate(rotationRadians);
     context.drawImage(garmentImage, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-  }
+    context.restore();
 
-  context.restore();
-
-  if (!useNaturalGarmentShape) {
     context.save();
     context.beginPath();
     traceGarmentPath(context, placement.points, scaleX, scaleY);
@@ -184,8 +227,55 @@ function drawGarmentImage(
     context.lineWidth = 2;
     context.stroke();
     context.restore();
+
+    return true;
   }
 
+  const segmentationMask = frame.segmentationMask;
+
+  if (segmentationMask && segmentationBuffers) {
+    const { bufferCanvas, maskCanvas } = segmentationBuffers;
+
+    if (bufferCanvas.width !== context.canvas.width || bufferCanvas.height !== context.canvas.height) {
+      bufferCanvas.width = context.canvas.width;
+      bufferCanvas.height = context.canvas.height;
+    }
+
+    const bufferContext = bufferCanvas.getContext("2d");
+
+    if (bufferContext) {
+      // Draw the garment's real silhouette into an offscreen buffer, then
+      // intersect it with the live body segmentation mask so the garment is
+      // only visible where the real body actually is, not just inside the
+      // landmark-derived guide box.
+      bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
+      paintNaturalFitGarment(bufferContext, garmentImage, centerX, centerY, rotationRadians, drawWidth, drawHeight, 1);
+      paintSegmentationMask(maskCanvas, segmentationMask);
+
+      bufferContext.globalCompositeOperation = "destination-in";
+      bufferContext.drawImage(
+        maskCanvas,
+        0,
+        0,
+        maskCanvas.width,
+        maskCanvas.height,
+        0,
+        0,
+        bufferCanvas.width,
+        bufferCanvas.height
+      );
+      bufferContext.globalCompositeOperation = "source-over";
+
+      context.save();
+      context.globalAlpha = 0.92;
+      context.drawImage(bufferCanvas, 0, 0);
+      context.restore();
+
+      return true;
+    }
+  }
+
+  paintNaturalFitGarment(context, garmentImage, centerX, centerY, rotationRadians, drawWidth, drawHeight, 0.92);
   return true;
 }
 
@@ -195,7 +285,8 @@ function drawPoseFrame(
   video: HTMLVideoElement,
   fitAdjustments: FitAdjustments,
   garmentImage: HTMLImageElement | null,
-  useNaturalGarmentShape: boolean
+  useNaturalGarmentShape: boolean,
+  segmentationBuffers: SegmentationBuffers | null
 ) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
@@ -209,7 +300,16 @@ function drawPoseFrame(
   context.fillStyle = "rgba(210, 95, 43, 0.95)";
 
   const drewGarment = garmentImage
-    ? drawGarmentImage(context, frame, garmentImage, fitAdjustments, scaleX, scaleY, useNaturalGarmentShape)
+    ? drawGarmentImage(
+        context,
+        frame,
+        garmentImage,
+        fitAdjustments,
+        scaleX,
+        scaleY,
+        useNaturalGarmentShape,
+        segmentationBuffers
+      )
     : false;
 
   if (!drewGarment) {
@@ -245,10 +345,16 @@ export function usePoseOverlay({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const detectorRef = useRef<PoseDetector | null>(null);
   const garmentImageRef = useRef<HTMLImageElement | null>(null);
+  const bufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const segmentationAvailableRef = useRef(false);
   const [overlayMode, setOverlayMode] = useState<DetectorMode>("mock");
   const [detectorMessage, setDetectorMessage] = useState("Loading pose detector...");
   const [garmentMessage, setGarmentMessage] = useState(
     "Upload a garment image to place a real asset on the torso region."
+  );
+  const [segmentationMessage, setSegmentationMessage] = useState(
+    "Body segmentation not active yet."
   );
 
   useEffect(() => {
@@ -339,13 +445,34 @@ export function usePoseOverlay({
       const poseFrame = detector.estimate(video, timestamp);
 
       if (poseFrame) {
+        if (!bufferCanvasRef.current) {
+          bufferCanvasRef.current = document.createElement("canvas");
+        }
+        if (!maskCanvasRef.current) {
+          maskCanvasRef.current = document.createElement("canvas");
+        }
+
+        const segmentationAvailable = Boolean(poseFrame.segmentationMask);
+        if (segmentationAvailableRef.current !== segmentationAvailable) {
+          segmentationAvailableRef.current = segmentationAvailable;
+          setSegmentationMessage(
+            segmentationAvailable
+              ? "Body segmentation active: garment clipped to your real silhouette."
+              : "Body segmentation unavailable this frame; using the guide-box fit."
+          );
+        }
+
         drawPoseFrame(
           context,
           poseFrame,
           video,
           fitAdjustments,
           garmentImageRef.current,
-          useNaturalGarmentShape
+          useNaturalGarmentShape,
+          {
+            bufferCanvas: bufferCanvasRef.current,
+            maskCanvas: maskCanvasRef.current
+          }
         );
       } else {
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
@@ -368,6 +495,7 @@ export function usePoseOverlay({
     canvasRef,
     detectorMessage,
     garmentMessage,
-    overlayMode
+    overlayMode,
+    segmentationMessage
   };
 }

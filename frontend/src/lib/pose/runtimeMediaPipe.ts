@@ -1,6 +1,6 @@
 import { poseConnections } from "./connections";
 import type { DetectorMode, PoseDetector } from "./poseDetector";
-import type { PoseFrame, PoseLandmark, PoseLandmarkId } from "./types";
+import type { PoseFrame, PoseLandmark, PoseLandmarkId, SegmentationMask } from "./types";
 
 type MediaPipeTasksVisionModule = {
   FilesetResolver: {
@@ -28,8 +28,16 @@ type MediaPipeNormalizedLandmark = {
   visibility?: number;
 };
 
+type MediaPipeMask = {
+  close?: () => void;
+  getAsFloat32Array: () => Float32Array;
+  height: number;
+  width: number;
+};
+
 type MediaPipePoseResult = {
   landmarks?: MediaPipeNormalizedLandmark[][];
+  segmentationMasks?: MediaPipeMask[];
 };
 
 type MediaPipePoseLandmarker = {
@@ -94,6 +102,28 @@ async function loadTasksVisionModule(): Promise<MediaPipeTasksVisionModule> {
   return loaded as MediaPipeTasksVisionModule;
 }
 
+function extractSegmentationMask(result: MediaPipePoseResult): SegmentationMask | null {
+  const mask = result.segmentationMasks?.[0];
+
+  if (!mask) {
+    return null;
+  }
+
+  try {
+    const data = new Float32Array(mask.getAsFloat32Array());
+    const { height, width } = mask;
+    mask.close?.();
+
+    if (!width || !height || !data.length) {
+      return null;
+    }
+
+    return { data, height, width };
+  } catch {
+    return null;
+  }
+}
+
 export async function createMediaPipeDetector(): Promise<PoseDetector> {
   if (typeof window === "undefined") {
     throw new Error("Pose detection only runs in the browser");
@@ -107,7 +137,7 @@ export async function createMediaPipeDetector(): Promise<PoseDetector> {
       modelAssetPath: POSE_MODEL_URL
     },
     numPoses: 1,
-    outputSegmentationMasks: false,
+    outputSegmentationMasks: true,
     runningMode: "VIDEO"
   });
 
@@ -130,7 +160,8 @@ export async function createMediaPipeDetector(): Promise<PoseDetector> {
 
       return {
         connections: poseConnections,
-        landmarks: normalized
+        landmarks: normalized,
+        segmentationMask: extractSegmentationMask(result)
       } satisfies PoseFrame;
     },
     kind: "mediapipe" satisfies DetectorMode,

@@ -34,7 +34,7 @@ export function CameraPreview({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
-  const { canvasRef, detectorMessage, garmentMessage, overlayMode } = usePoseOverlay({
+  const { canvasRef, detectorMessage, garmentMessage, overlayMode, segmentationMessage } = usePoseOverlay({
     enabled: status === "live",
     fitAdjustments,
     garmentSrc,
@@ -155,6 +155,7 @@ export function CameraPreview({
       <div className="camera-card__footer camera-card__footer--stacked">
         <p>{detectorMessage}</p>
         <p>{garmentName ? `Loaded garment: ${garmentName}` : garmentMessage}</p>
+        {useNaturalGarmentShape && status === "live" ? <p>{segmentationMessage}</p> : null}
         <p>{status === "live" ? `Capture export name: ${captureFileName}` : "Camera must be live to capture."}</p>
       </div>
     </div>
