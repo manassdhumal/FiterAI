@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 dist/
 .venv/
 __pycache__/
@@ -8,4 +8,5 @@ frontend/.vite/
 backend/.pytest_cache/
 data/
 *.md
+!README.md
 docs/
