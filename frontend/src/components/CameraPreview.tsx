@@ -14,6 +14,7 @@ type CameraPreviewProps = {
   garmentName: string | null;
   garmentSrc: string | null;
   onCapture: (snapshot: SnapshotPayload) => void;
+  useNaturalGarmentShape: boolean;
 };
 
 const statusCopy = {
@@ -27,7 +28,8 @@ export function CameraPreview({
   fitAdjustments,
   garmentName,
   garmentSrc,
-  onCapture
+  onCapture,
+  useNaturalGarmentShape
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
@@ -36,6 +38,7 @@ export function CameraPreview({
     enabled: status === "live",
     fitAdjustments,
     garmentSrc,
+    useNaturalGarmentShape,
     videoRef
   });
 

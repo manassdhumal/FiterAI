@@ -13,6 +13,7 @@ type UsePoseOverlayOptions = {
   enabled: boolean;
   fitAdjustments: FitAdjustments;
   garmentSrc: string | null;
+  useNaturalGarmentShape: boolean;
   videoRef: RefObject<HTMLVideoElement>;
 };
 
@@ -123,7 +124,8 @@ function drawGarmentImage(
   garmentImage: HTMLImageElement,
   fitAdjustments: FitAdjustments,
   scaleX: number,
-  scaleY: number
+  scaleY: number,
+  useNaturalGarmentShape: boolean
 ): boolean {
   const placement = createGarmentPlacement(frame, fitAdjustments);
 
@@ -146,24 +148,43 @@ function drawGarmentImage(
   const rotationRadians = (fitAdjustments.rotation * Math.PI) / 180;
 
   context.save();
-  context.beginPath();
-  traceGarmentPath(context, placement.points, scaleX, scaleY);
-  context.clip();
+
+  if (!useNaturalGarmentShape) {
+    context.beginPath();
+    traceGarmentPath(context, placement.points, scaleX, scaleY);
+    context.clip();
+  }
+
   context.globalAlpha = 0.92;
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   context.translate(placement.center.x * scaleX, placement.center.y * scaleY);
   context.rotate(rotationRadians);
-  context.drawImage(garmentImage, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+
+  if (useNaturalGarmentShape) {
+    // The processed garment already has a transparent background, so its own
+    // alpha silhouette defines the visible shape. Contain-fit it into the
+    // guide box instead of stretching, to avoid distorting the garment.
+    const imageAspect = garmentImage.naturalWidth / garmentImage.naturalHeight || 1;
+    const boxAspect = drawWidth / drawHeight;
+    const renderWidth = imageAspect > boxAspect ? drawWidth : drawHeight * imageAspect;
+    const renderHeight = imageAspect > boxAspect ? drawWidth / imageAspect : drawHeight;
+    context.drawImage(garmentImage, -renderWidth / 2, -renderHeight / 2, renderWidth, renderHeight);
+  } else {
+    context.drawImage(garmentImage, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  }
+
   context.restore();
 
-  context.save();
-  context.beginPath();
-  traceGarmentPath(context, placement.points, scaleX, scaleY);
-  context.strokeStyle = "rgba(255, 235, 214, 0.95)";
-  context.lineWidth = 2;
-  context.stroke();
-  context.restore();
+  if (!useNaturalGarmentShape) {
+    context.save();
+    context.beginPath();
+    traceGarmentPath(context, placement.points, scaleX, scaleY);
+    context.strokeStyle = "rgba(255, 235, 214, 0.95)";
+    context.lineWidth = 2;
+    context.stroke();
+    context.restore();
+  }
 
   return true;
 }
@@ -173,7 +194,8 @@ function drawPoseFrame(
   frame: PoseFrame,
   video: HTMLVideoElement,
   fitAdjustments: FitAdjustments,
-  garmentImage: HTMLImageElement | null
+  garmentImage: HTMLImageElement | null,
+  useNaturalGarmentShape: boolean
 ) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
@@ -187,7 +209,7 @@ function drawPoseFrame(
   context.fillStyle = "rgba(210, 95, 43, 0.95)";
 
   const drewGarment = garmentImage
-    ? drawGarmentImage(context, frame, garmentImage, fitAdjustments, scaleX, scaleY)
+    ? drawGarmentImage(context, frame, garmentImage, fitAdjustments, scaleX, scaleY, useNaturalGarmentShape)
     : false;
 
   if (!drewGarment) {
@@ -217,6 +239,7 @@ export function usePoseOverlay({
   enabled,
   fitAdjustments,
   garmentSrc,
+  useNaturalGarmentShape,
   videoRef
 }: UsePoseOverlayOptions): UsePoseOverlayResult {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -316,7 +339,14 @@ export function usePoseOverlay({
       const poseFrame = detector.estimate(video, timestamp);
 
       if (poseFrame) {
-        drawPoseFrame(context, poseFrame, video, fitAdjustments, garmentImageRef.current);
+        drawPoseFrame(
+          context,
+          poseFrame,
+          video,
+          fitAdjustments,
+          garmentImageRef.current,
+          useNaturalGarmentShape
+        );
       } else {
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
       }
@@ -332,7 +362,7 @@ export function usePoseOverlay({
       const context = canvas?.getContext("2d");
       context?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
     };
-  }, [enabled, fitAdjustments, videoRef]);
+  }, [enabled, fitAdjustments, useNaturalGarmentShape, videoRef]);
 
   return {
     canvasRef,

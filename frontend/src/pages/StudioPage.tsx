@@ -239,6 +239,7 @@ export function StudioPage() {
             garmentName={garmentAsset?.name ?? null}
             garmentSrc={garmentAsset?.src ?? null}
             onCapture={handleCapture}
+            useNaturalGarmentShape={garmentAsset?.status === "ready"}
           />
         </article>
 
