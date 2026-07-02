@@ -44,6 +44,25 @@ export type GarmentPlacement = {
   points: Point[];
 };
 
+// buildGarmentGuidePoints() returns 10 points walking the outline
+// (neckLeft, leftShoulder, sleeveLeft, waistLeft, hipLeft, hipRight,
+// waistRight, sleeveRight, rightShoulder, neckRight). These pair up into
+// 5 left/right rows (neck, shoulder, sleeve, waist, hip) that double as a
+// mesh for piecewise-affine garment warping, instead of one rigid transform
+// for the whole garment image.
+export const garmentMeshRowIndexPairs: [number, number][] = [
+  [0, 9],
+  [1, 8],
+  [2, 7],
+  [3, 6],
+  [4, 5]
+];
+
+// Approximate vertical position (0 = top/neck, 1 = bottom/hem) of each mesh
+// row within a garment image, derived from calculateTorsoFitRegion's own
+// proportions (shoulderLift/sleeveDrop/waist-inset/hip offsets).
+export const garmentMeshRowSourceFractions = [0, 0.11, 0.29, 0.83, 1];
+
 function byId(frame: PoseFrame, id: PoseLandmark["id"]) {
   return frame.landmarks.find((landmark) => landmark.id === id) ?? null;
 }

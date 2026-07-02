@@ -3,7 +3,10 @@ import type { MutableRefObject, RefObject } from "react";
 
 import {
   createGarmentPlacement,
-  type FitAdjustments
+  garmentMeshRowIndexPairs,
+  garmentMeshRowSourceFractions,
+  type FitAdjustments,
+  type Point
 } from "../lib/pose/garmentFit";
 import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
@@ -12,6 +15,13 @@ import type { PoseFrame, PoseLandmark, SegmentationMask } from "../lib/pose/type
 type SegmentationBuffers = {
   bufferCanvas: HTMLCanvasElement;
   maskCanvas: HTMLCanvasElement;
+};
+
+type GarmentBounds = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
 };
 
 type UsePoseOverlayOptions = {
@@ -124,31 +134,197 @@ function drawGarmentGuide(
   context.restore();
 }
 
-function paintNaturalFitGarment(
+function computeOpaqueBounds(image: HTMLImageElement): GarmentBounds | null {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+
+  if (!width || !height) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(image, 0, 0);
+
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, width, height).data;
+  } catch {
+    return null;
+  }
+
+  const alphaThreshold = 12;
+  const step = 2;
+  let minX = width;
+  let maxX = 0;
+  let minY = height;
+  let maxY = 0;
+  let found = false;
+
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      if (pixels[(y * width + x) * 4 + 3] > alphaThreshold) {
+        found = true;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (!found) {
+    return null;
+  }
+
+  return {
+    bottom: maxY / height,
+    left: minX / width,
+    right: maxX / width,
+    top: minY / height
+  };
+}
+
+// Computes the 2x3 affine matrix [a, b, c, d, e, f] mapping source triangle
+// (s0, s1, s2) onto destination triangle (d0, d1, d2), i.e. a*x + c*y + e = u
+// and b*x + d*y + f = v for each correspondence.
+function computeAffineTransform(
+  s0: Point,
+  s1: Point,
+  s2: Point,
+  d0: Point,
+  d1: Point,
+  d2: Point
+): [number, number, number, number, number, number] | null {
+  const denom = s0.x * (s1.y - s2.y) + s1.x * (s2.y - s0.y) + s2.x * (s0.y - s1.y);
+
+  if (Math.abs(denom) < 1e-6) {
+    return null;
+  }
+
+  const a = (d0.x * (s1.y - s2.y) + d1.x * (s2.y - s0.y) + d2.x * (s0.y - s1.y)) / denom;
+  const b = (d0.y * (s1.y - s2.y) + d1.y * (s2.y - s0.y) + d2.y * (s0.y - s1.y)) / denom;
+  const c = (d0.x * (s2.x - s1.x) + d1.x * (s0.x - s2.x) + d2.x * (s1.x - s0.x)) / denom;
+  const d = (d0.y * (s2.x - s1.x) + d1.y * (s0.x - s2.x) + d2.y * (s1.x - s0.x)) / denom;
+  const e = d0.x - a * s0.x - c * s0.y;
+  const f = d0.y - b * s0.x - d * s0.y;
+
+  return [a, b, c, d, e, f];
+}
+
+function expandTriangleFromCentroid(a: Point, b: Point, c: Point, factor: number): [Point, Point, Point] {
+  const centroid = { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 };
+  const expand = (point: Point) => ({
+    x: centroid.x + (point.x - centroid.x) * factor,
+    y: centroid.y + (point.y - centroid.y) * factor
+  });
+
+  return [expand(a), expand(b), expand(c)];
+}
+
+function paintWarpedTriangle(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  source: [Point, Point, Point],
+  destination: [Point, Point, Point]
+) {
+  const transform = computeAffineTransform(
+    source[0],
+    source[1],
+    source[2],
+    destination[0],
+    destination[1],
+    destination[2]
+  );
+
+  if (!transform) {
+    return;
+  }
+
+  // Clip is expanded slightly beyond the exact triangle so adjacent
+  // triangles overlap a hair instead of leaving anti-aliased seam gaps.
+  const [clip0, clip1, clip2] = expandTriangleFromCentroid(
+    destination[0],
+    destination[1],
+    destination[2],
+    1.02
+  );
+
+  context.save();
+  context.beginPath();
+  context.moveTo(clip0.x, clip0.y);
+  context.lineTo(clip1.x, clip1.y);
+  context.lineTo(clip2.x, clip2.y);
+  context.closePath();
+  context.clip();
+  context.transform(...transform);
+  context.drawImage(image, 0, 0);
+  context.restore();
+}
+
+function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
-  centerX: number,
-  centerY: number,
-  rotationRadians: number,
-  drawWidth: number,
-  drawHeight: number,
+  canvasPoints: Point[],
+  garmentBounds: GarmentBounds | null,
   alpha: number
 ) {
-  // The processed garment already has a transparent background, so its own
-  // alpha silhouette defines the visible shape. Contain-fit it into the
-  // guide box instead of stretching, to avoid distorting the garment.
-  const imageAspect = garmentImage.naturalWidth / garmentImage.naturalHeight || 1;
-  const boxAspect = drawWidth / drawHeight;
-  const renderWidth = imageAspect > boxAspect ? drawWidth : drawHeight * imageAspect;
-  const renderHeight = imageAspect > boxAspect ? drawWidth / imageAspect : drawHeight;
+  const imageWidth = garmentImage.naturalWidth;
+  const imageHeight = garmentImage.naturalHeight;
+
+  if (!imageWidth || !imageHeight) {
+    return;
+  }
+
+  const bounds = garmentBounds ?? { bottom: 1, left: 0, right: 1, top: 0 };
+  const contentLeft = bounds.left * imageWidth;
+  const contentRight = bounds.right * imageWidth;
+  const contentTop = bounds.top * imageHeight;
+  const contentHeight = (bounds.bottom - bounds.top) * imageHeight;
 
   context.save();
   context.globalAlpha = alpha;
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.translate(centerX, centerY);
-  context.rotate(rotationRadians);
-  context.drawImage(garmentImage, -renderWidth / 2, -renderHeight / 2, renderWidth, renderHeight);
+
+  for (let rowIndex = 0; rowIndex < garmentMeshRowIndexPairs.length - 1; rowIndex += 1) {
+    const [topLeftIdx, topRightIdx] = garmentMeshRowIndexPairs[rowIndex];
+    const [bottomLeftIdx, bottomRightIdx] = garmentMeshRowIndexPairs[rowIndex + 1];
+
+    const topLeft = canvasPoints[topLeftIdx];
+    const topRight = canvasPoints[topRightIdx];
+    const bottomLeft = canvasPoints[bottomLeftIdx];
+    const bottomRight = canvasPoints[bottomRightIdx];
+
+    const sourceTopY = contentTop + garmentMeshRowSourceFractions[rowIndex] * contentHeight;
+    const sourceBottomY = contentTop + garmentMeshRowSourceFractions[rowIndex + 1] * contentHeight;
+
+    const sourceTopLeft = { x: contentLeft, y: sourceTopY };
+    const sourceTopRight = { x: contentRight, y: sourceTopY };
+    const sourceBottomLeft = { x: contentLeft, y: sourceBottomY };
+    const sourceBottomRight = { x: contentRight, y: sourceBottomY };
+
+    paintWarpedTriangle(
+      context,
+      garmentImage,
+      [sourceTopLeft, sourceTopRight, sourceBottomLeft],
+      [topLeft, topRight, bottomLeft]
+    );
+    paintWarpedTriangle(
+      context,
+      garmentImage,
+      [sourceTopRight, sourceBottomRight, sourceBottomLeft],
+      [topRight, bottomRight, bottomLeft]
+    );
+  }
+
   context.restore();
 }
 
@@ -183,7 +359,8 @@ function drawGarmentImage(
   scaleX: number,
   scaleY: number,
   useNaturalGarmentShape: boolean,
-  segmentationBuffers: SegmentationBuffers | null
+  segmentationBuffers: SegmentationBuffers | null,
+  garmentBounds: GarmentBounds | null
 ): boolean {
   const placement = createGarmentPlacement(frame, fitAdjustments);
 
@@ -249,7 +426,7 @@ function drawGarmentImage(
       // only visible where the real body actually is, not just inside the
       // landmark-derived guide box.
       bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
-      paintNaturalFitGarment(bufferContext, garmentImage, centerX, centerY, rotationRadians, drawWidth, drawHeight, 1);
+      paintMeshWarpedGarment(bufferContext, garmentImage, canvasPoints, garmentBounds, 1);
       paintSegmentationMask(maskCanvas, segmentationMask);
 
       bufferContext.globalCompositeOperation = "destination-in";
@@ -275,7 +452,7 @@ function drawGarmentImage(
     }
   }
 
-  paintNaturalFitGarment(context, garmentImage, centerX, centerY, rotationRadians, drawWidth, drawHeight, 0.92);
+  paintMeshWarpedGarment(context, garmentImage, canvasPoints, garmentBounds, 0.92);
   return true;
 }
 
@@ -286,7 +463,8 @@ function drawPoseFrame(
   fitAdjustments: FitAdjustments,
   garmentImage: HTMLImageElement | null,
   useNaturalGarmentShape: boolean,
-  segmentationBuffers: SegmentationBuffers | null
+  segmentationBuffers: SegmentationBuffers | null,
+  garmentBounds: GarmentBounds | null
 ) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
@@ -308,7 +486,8 @@ function drawPoseFrame(
         scaleX,
         scaleY,
         useNaturalGarmentShape,
-        segmentationBuffers
+        segmentationBuffers,
+        garmentBounds
       )
     : false;
 
@@ -345,6 +524,7 @@ export function usePoseOverlay({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const detectorRef = useRef<PoseDetector | null>(null);
   const garmentImageRef = useRef<HTMLImageElement | null>(null);
+  const garmentBoundsRef = useRef<GarmentBounds | null>(null);
   const bufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const segmentationAvailableRef = useRef(false);
@@ -386,6 +566,7 @@ export function usePoseOverlay({
   useEffect(() => {
     if (!garmentSrc) {
       garmentImageRef.current = null;
+      garmentBoundsRef.current = null;
       setGarmentMessage("Upload a garment image to place a real asset on the torso region.");
       return;
     }
@@ -398,6 +579,9 @@ export function usePoseOverlay({
       }
 
       garmentImageRef.current = image;
+      // Cached once per garment load so per-frame mesh warping maps the
+      // garment's actual opaque content, not blank padding around it.
+      garmentBoundsRef.current = computeOpaqueBounds(image);
       setGarmentMessage("Garment image loaded and ready for live placement.");
     };
     image.onerror = () => {
@@ -406,6 +590,7 @@ export function usePoseOverlay({
       }
 
       garmentImageRef.current = null;
+      garmentBoundsRef.current = null;
       setGarmentMessage("Unable to load this garment image. Try a different file.");
     };
     image.src = garmentSrc;
@@ -472,7 +657,8 @@ export function usePoseOverlay({
           {
             bufferCanvas: bufferCanvasRef.current,
             maskCanvas: maskCanvasRef.current
-          }
+          },
+          garmentBoundsRef.current
         );
       } else {
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
