@@ -97,22 +97,23 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   }
 
   const centerX = (leftShoulder.x + rightShoulder.x) / 2;
-  const shoulderY = Math.min(leftShoulder.y, rightShoulder.y);
-  const hipY = Math.max(leftHip.y, rightHip.y);
   const sleeveDrop = torsoHeight * 0.25;
   const sleeveReach = shoulderWidth * 0.28;
   const shoulderLift = torsoHeight * 0.06;
   const neckInset = shoulderWidth * 0.18;
   const hipInset = shoulderWidth * 0.08;
 
+  // Each row keeps its own left/right landmark Y instead of collapsing to a
+  // shared min/max, so real shoulder/hip tilt reaches the mesh-warp rows
+  // (buildGarmentGuidePoints) instead of being flattened out.
   return {
     centerX,
     height: torsoHeight,
-    hipLeft: { x: leftHip.x + hipInset, y: hipY },
-    hipRight: { x: rightHip.x - hipInset, y: hipY },
+    hipLeft: { x: leftHip.x + hipInset, y: leftHip.y },
+    hipRight: { x: rightHip.x - hipInset, y: rightHip.y },
     leftShoulder: { x: leftShoulder.x - shoulderWidth * 0.08, y: leftShoulder.y + shoulderLift },
-    neckLeft: { x: centerX - neckInset, y: shoulderY - shoulderLift },
-    neckRight: { x: centerX + neckInset, y: shoulderY - shoulderLift },
+    neckLeft: { x: centerX - neckInset, y: leftShoulder.y - shoulderLift },
+    neckRight: { x: centerX + neckInset, y: rightShoulder.y - shoulderLift },
     rightShoulder: { x: rightShoulder.x + shoulderWidth * 0.08, y: rightShoulder.y + shoulderLift },
     sleeveLeft: { x: leftShoulder.x - sleeveReach, y: leftShoulder.y + sleeveDrop },
     sleeveRight: { x: rightShoulder.x + sleeveReach, y: rightShoulder.y + sleeveDrop },

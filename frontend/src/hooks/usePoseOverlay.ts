@@ -10,6 +10,12 @@ import {
 } from "../lib/pose/garmentFit";
 import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
+import {
+  DEFAULT_LANDMARK_SMOOTHING_FACTOR,
+  smoothLandmarks,
+  toLandmarkHistory,
+  type LandmarkHistory
+} from "../lib/pose/smoothing";
 import type { PoseFrame, PoseLandmark, SegmentationMask } from "../lib/pose/types";
 
 type SegmentationBuffers = {
@@ -528,6 +534,7 @@ export function usePoseOverlay({
   const bufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const segmentationAvailableRef = useRef(false);
+  const landmarkHistoryRef = useRef<LandmarkHistory | null>(null);
   const [overlayMode, setOverlayMode] = useState<DetectorMode>("mock");
   const [detectorMessage, setDetectorMessage] = useState("Loading pose detector...");
   const [garmentMessage, setGarmentMessage] = useState(
@@ -627,9 +634,20 @@ export function usePoseOverlay({
       }
 
       resizeCanvas(canvas, video);
-      const poseFrame = detector.estimate(video, timestamp);
+      const rawPoseFrame = detector.estimate(video, timestamp);
 
-      if (poseFrame) {
+      if (rawPoseFrame) {
+        // Mock-mode motion is already a smooth deterministic function of
+        // time, so only damp jitter for real (noisy) live-camera detection.
+        const smoothingFactor = detector.kind === "mock" ? 1 : DEFAULT_LANDMARK_SMOOTHING_FACTOR;
+        const smoothedLandmarks = smoothLandmarks(
+          rawPoseFrame.landmarks,
+          landmarkHistoryRef.current,
+          smoothingFactor
+        );
+        landmarkHistoryRef.current = toLandmarkHistory(smoothedLandmarks);
+        const poseFrame: PoseFrame = { ...rawPoseFrame, landmarks: smoothedLandmarks };
+
         if (!bufferCanvasRef.current) {
           bufferCanvasRef.current = document.createElement("canvas");
         }
@@ -661,6 +679,7 @@ export function usePoseOverlay({
           garmentBoundsRef.current
         );
       } else {
+        landmarkHistoryRef.current = null;
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
       }
 
