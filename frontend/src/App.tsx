@@ -1,4 +1,4 @@
-﻿import { LandingPage } from "./pages/LandingPage";
+import { LandingPage } from "./pages/LandingPage";
 import { StudioPage } from "./pages/StudioPage";
 
 function App() {

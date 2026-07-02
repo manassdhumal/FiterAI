@@ -1,4 +1,4 @@
-﻿import { poseConnections } from "./connections";
+import { poseConnections } from "./connections";
 import type { DetectorMode, PoseDetector } from "./poseDetector";
 import type { PoseFrame, PoseLandmark, PoseLandmarkId } from "./types";
 

@@ -1,4 +1,4 @@
-﻿import { poseConnections } from "./connections";
+import { poseConnections } from "./connections";
 import type { PoseFrame, PoseLandmark, PoseLandmarkId } from "./types";
 
 function createLandmark(

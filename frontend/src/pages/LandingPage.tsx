@@ -1,4 +1,4 @@
-﻿export function LandingPage() {
+export function LandingPage() {
   return (
     <section className="hero">
       <div className="hero__copy">

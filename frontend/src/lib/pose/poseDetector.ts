@@ -1,4 +1,4 @@
-﻿import { estimateMockPoseFrame } from "./mockPose";
+import { estimateMockPoseFrame } from "./mockPose";
 import { createMediaPipeDetector } from "./runtimeMediaPipe";
 import type { PoseFrame } from "./types";
 

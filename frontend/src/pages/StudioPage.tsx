@@ -1,4 +1,11 @@
-﻿import { CameraPreview } from "../components/CameraPreview";
+import { useEffect, useState } from "react";
+import type { ChangeEvent } from "react";
+
+import { CameraPreview } from "../components/CameraPreview";
+import {
+  defaultFitAdjustments,
+  type FitAdjustments
+} from "../lib/pose/garmentFit";
 
 const garmentSources = [
   "Upload image",
@@ -8,16 +15,89 @@ const garmentSources = [
   "Wardrobe item"
 ];
 
-const manualControls = [
-  "Move X/Y",
-  "Scale",
-  "Rotate",
-  "Torso length",
-  "Sleeve adjust",
-  "Recalibrate"
+type GarmentAsset = {
+  name: string;
+  src: string;
+};
+
+type FitControl = {
+  key: keyof FitAdjustments;
+  label: string;
+  max: number;
+  min: number;
+  step: number;
+};
+
+const fitControls: FitControl[] = [
+  { key: "offsetX", label: "Move X", max: 0.4, min: -0.4, step: 0.01 },
+  { key: "offsetY", label: "Move Y", max: 0.4, min: -0.4, step: 0.01 },
+  { key: "scale", label: "Scale", max: 1.45, min: 0.7, step: 0.01 },
+  { key: "rotation", label: "Rotate", max: 25, min: -25, step: 1 },
+  { key: "torsoLength", label: "Torso Length", max: 0.4, min: -0.3, step: 0.01 },
+  { key: "sleeveSpread", label: "Sleeve Spread", max: 0.4, min: -0.35, step: 0.01 }
 ];
 
+function formatFitValue(control: FitControl, value: number) {
+  if (control.key === "rotation") {
+    return `${Math.round(value)}deg`;
+  }
+
+  if (control.key === "scale") {
+    return `${value.toFixed(2)}x`;
+  }
+
+  return `${Math.round(value * 100)}%`;
+}
+
 export function StudioPage() {
+  const [garmentAsset, setGarmentAsset] = useState<GarmentAsset | null>(null);
+  const [fitAdjustments, setFitAdjustments] = useState<FitAdjustments>(defaultFitAdjustments);
+
+  useEffect(() => {
+    return () => {
+      if (garmentAsset?.src.startsWith("blob:")) {
+        URL.revokeObjectURL(garmentAsset.src);
+      }
+    };
+  }, [garmentAsset]);
+
+  const handleGarmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setGarmentAsset((current) => {
+      if (current?.src.startsWith("blob:")) {
+        URL.revokeObjectURL(current.src);
+      }
+
+      return {
+        name: file.name,
+        src: URL.createObjectURL(file)
+      };
+    });
+
+    event.target.value = "";
+  };
+
+  const clearGarment = () => {
+    setGarmentAsset((current) => {
+      if (current?.src.startsWith("blob:")) {
+        URL.revokeObjectURL(current.src);
+      }
+
+      return null;
+    });
+  };
+
+  const updateFitAdjustment = (key: keyof FitAdjustments, value: number) => {
+    setFitAdjustments((current) => ({
+      ...current,
+      [key]: value
+    }));
+  };
+
   return (
     <section className="studio">
       <div className="studio__header">
@@ -28,6 +108,29 @@ export function StudioPage() {
       <div className="studio__grid">
         <article className="panel">
           <h3>Garment Intake</h3>
+          <p className="panel__subtitle">
+            Start with a local garment image so we can place a real asset onto the live torso region.
+          </p>
+
+          <label className="upload-dropzone">
+            <span>Choose garment image</span>
+            <small>PNG works best right now, but any image file can be tested.</small>
+            <input type="file" accept="image/*" onChange={handleGarmentChange} />
+          </label>
+
+          {garmentAsset ? (
+            <div className="garment-preview">
+              <img src={garmentAsset.src} alt={garmentAsset.name} />
+              <div className="garment-preview__meta">
+                <strong>{garmentAsset.name}</strong>
+                <p>The live camera view will now project this image onto the torso fit region.</p>
+                <button type="button" className="button--ghost" onClick={clearGarment}>
+                  Remove garment
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <ul>
             {garmentSources.map((source) => (
               <li key={source}>{source}</li>
@@ -37,16 +140,50 @@ export function StudioPage() {
 
         <article className="panel panel--camera">
           <h3>Camera Preview</h3>
-          <CameraPreview />
+          <CameraPreview
+            fitAdjustments={fitAdjustments}
+            garmentName={garmentAsset?.name ?? null}
+            garmentSrc={garmentAsset?.src ?? null}
+          />
         </article>
 
         <article className="panel">
-          <h3>Fit Controls</h3>
-          <ul>
-            {manualControls.map((control) => (
-              <li key={control}>{control}</li>
+          <div className="fit-controls__header">
+            <div>
+              <h3>Fit Controls</h3>
+              <p className="panel__subtitle">
+                These controls now change the garment placement live in the preview.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button--ghost"
+              onClick={() => setFitAdjustments(defaultFitAdjustments)}
+            >
+              Reset fit
+            </button>
+          </div>
+
+          <div className="fit-controls">
+            {fitControls.map((control) => (
+              <label key={control.key} className="fit-control">
+                <div className="fit-control__row">
+                  <span>{control.label}</span>
+                  <strong>{formatFitValue(control, fitAdjustments[control.key])}</strong>
+                </div>
+                <input
+                  type="range"
+                  min={control.min}
+                  max={control.max}
+                  step={control.step}
+                  value={fitAdjustments[control.key]}
+                  onChange={(event) =>
+                    updateFitAdjustment(control.key, Number(event.target.value))
+                  }
+                />
+              </label>
             ))}
-          </ul>
+          </div>
         </article>
       </div>
     </section>

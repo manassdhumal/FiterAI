@@ -1,4 +1,4 @@
-﻿export type PoseLandmarkId =
+export type PoseLandmarkId =
   | "nose"
   | "leftShoulder"
   | "rightShoulder"

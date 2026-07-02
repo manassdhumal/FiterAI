@@ -1,19 +1,25 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject, RefObject } from "react";
 
-import { calculateTorsoFitRegion } from "../lib/pose/garmentFit";
+import {
+  createGarmentPlacement,
+  type FitAdjustments
+} from "../lib/pose/garmentFit";
 import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
 import type { PoseFrame, PoseLandmark } from "../lib/pose/types";
 
 type UsePoseOverlayOptions = {
   enabled: boolean;
+  fitAdjustments: FitAdjustments;
+  garmentSrc: string | null;
   videoRef: RefObject<HTMLVideoElement>;
 };
 
 type UsePoseOverlayResult = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   detectorMessage: string;
+  garmentMessage: string;
   overlayMode: DetectorMode;
 };
 
@@ -48,39 +54,12 @@ function drawLandmark(
   context.fill();
 }
 
-function drawGarmentGuide(
+function traceGarmentPath(
   context: CanvasRenderingContext2D,
-  frame: PoseFrame,
+  points: { x: number; y: number }[],
   scaleX: number,
   scaleY: number
 ) {
-  const fitRegion = calculateTorsoFitRegion(frame);
-
-  if (!fitRegion) {
-    return;
-  }
-
-  const points = [
-    fitRegion.neckLeft,
-    fitRegion.leftShoulder,
-    fitRegion.sleeveLeft,
-    {
-      x: fitRegion.centerX - fitRegion.waistInset - fitRegion.width * 0.24,
-      y: fitRegion.hipLeft.y - fitRegion.height * 0.18
-    },
-    fitRegion.hipLeft,
-    fitRegion.hipRight,
-    {
-      x: fitRegion.centerX + fitRegion.waistInset + fitRegion.width * 0.24,
-      y: fitRegion.hipRight.y - fitRegion.height * 0.18
-    },
-    fitRegion.sleeveRight,
-    fitRegion.rightShoulder,
-    fitRegion.neckRight
-  ];
-
-  context.save();
-  context.beginPath();
   points.forEach((point, index) => {
     const x = point.x * scaleX;
     const y = point.y * scaleY;
@@ -92,33 +71,110 @@ function drawGarmentGuide(
     }
   });
   context.closePath();
+}
+
+function drawGarmentGuide(
+  context: CanvasRenderingContext2D,
+  frame: PoseFrame,
+  fitAdjustments: FitAdjustments,
+  scaleX: number,
+  scaleY: number
+) {
+  const placement = createGarmentPlacement(frame, fitAdjustments);
+
+  if (!placement) {
+    return;
+  }
+
+  context.save();
+  context.beginPath();
+  traceGarmentPath(context, placement.points, scaleX, scaleY);
   context.fillStyle = "rgba(255, 173, 96, 0.26)";
   context.strokeStyle = "rgba(255, 214, 153, 0.98)";
   context.lineWidth = 3;
   context.fill();
   context.stroke();
 
-  const neckWidth = (fitRegion.neckRight.x - fitRegion.neckLeft.x) * scaleX;
-  const neckCenterX = ((fitRegion.neckLeft.x + fitRegion.neckRight.x) / 2) * scaleX;
-  const neckY = fitRegion.neckLeft.y * scaleY;
-
   context.beginPath();
+  context.moveTo(placement.points[0].x * scaleX, placement.points[0].y * scaleY);
+  context.quadraticCurveTo(
+    placement.necklineControl.x * scaleX,
+    placement.necklineControl.y * scaleY,
+    placement.points[placement.points.length - 1].x * scaleX,
+    placement.points[placement.points.length - 1].y * scaleY
+  );
   context.strokeStyle = "rgba(255, 245, 233, 0.95)";
   context.lineWidth = 2;
-  context.arc(neckCenterX, neckY, neckWidth * 0.28, Math.PI * 0.1, Math.PI * 0.9, false);
   context.stroke();
 
   context.fillStyle = "rgba(255, 250, 244, 0.92)";
   context.font = `${Math.max(14, Math.round(18 * scaleX))}px Georgia`;
   context.fillText(
     "Garment fit region",
-    (fitRegion.centerX - fitRegion.width * 0.28) * scaleX,
-    (fitRegion.hipLeft.y + fitRegion.height * 0.12) * scaleY
+    (placement.center.x - 70) * scaleX,
+    (placement.center.y + 85) * scaleY
   );
   context.restore();
 }
 
-function drawPoseFrame(context: CanvasRenderingContext2D, frame: PoseFrame, video: HTMLVideoElement) {
+function drawGarmentImage(
+  context: CanvasRenderingContext2D,
+  frame: PoseFrame,
+  garmentImage: HTMLImageElement,
+  fitAdjustments: FitAdjustments,
+  scaleX: number,
+  scaleY: number
+): boolean {
+  const placement = createGarmentPlacement(frame, fitAdjustments);
+
+  if (!placement) {
+    return false;
+  }
+
+  const canvasPoints = placement.points.map((point) => ({
+    x: point.x * scaleX,
+    y: point.y * scaleY
+  }));
+  const xValues = canvasPoints.map((point) => point.x);
+  const yValues = canvasPoints.map((point) => point.y);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minY = Math.min(...yValues);
+  const maxY = Math.max(...yValues);
+  const drawWidth = Math.max(1, maxX - minX);
+  const drawHeight = Math.max(1, maxY - minY);
+  const rotationRadians = (fitAdjustments.rotation * Math.PI) / 180;
+
+  context.save();
+  context.beginPath();
+  traceGarmentPath(context, placement.points, scaleX, scaleY);
+  context.clip();
+  context.globalAlpha = 0.92;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.translate(placement.center.x * scaleX, placement.center.y * scaleY);
+  context.rotate(rotationRadians);
+  context.drawImage(garmentImage, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  context.restore();
+
+  context.save();
+  context.beginPath();
+  traceGarmentPath(context, placement.points, scaleX, scaleY);
+  context.strokeStyle = "rgba(255, 235, 214, 0.95)";
+  context.lineWidth = 2;
+  context.stroke();
+  context.restore();
+
+  return true;
+}
+
+function drawPoseFrame(
+  context: CanvasRenderingContext2D,
+  frame: PoseFrame,
+  video: HTMLVideoElement,
+  fitAdjustments: FitAdjustments,
+  garmentImage: HTMLImageElement | null
+) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
   const scaleX = context.canvas.width / sourceWidth;
@@ -130,7 +186,13 @@ function drawPoseFrame(context: CanvasRenderingContext2D, frame: PoseFrame, vide
   context.strokeStyle = "rgba(255, 244, 232, 0.88)";
   context.fillStyle = "rgba(210, 95, 43, 0.95)";
 
-  drawGarmentGuide(context, frame, scaleX, scaleY);
+  const drewGarment = garmentImage
+    ? drawGarmentImage(context, frame, garmentImage, fitAdjustments, scaleX, scaleY)
+    : false;
+
+  if (!drewGarment) {
+    drawGarmentGuide(context, frame, fitAdjustments, scaleX, scaleY);
+  }
 
   frame.connections.forEach(([fromId, toId]) => {
     const from = landmarksById.get(fromId);
@@ -151,11 +213,20 @@ function drawPoseFrame(context: CanvasRenderingContext2D, frame: PoseFrame, vide
   });
 }
 
-export function usePoseOverlay({ enabled, videoRef }: UsePoseOverlayOptions): UsePoseOverlayResult {
+export function usePoseOverlay({
+  enabled,
+  fitAdjustments,
+  garmentSrc,
+  videoRef
+}: UsePoseOverlayOptions): UsePoseOverlayResult {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const detectorRef = useRef<PoseDetector | null>(null);
+  const garmentImageRef = useRef<HTMLImageElement | null>(null);
   const [overlayMode, setOverlayMode] = useState<DetectorMode>("mock");
   const [detectorMessage, setDetectorMessage] = useState("Loading pose detector...");
+  const [garmentMessage, setGarmentMessage] = useState(
+    "Upload a garment image to place a real asset on the torso region."
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -182,6 +253,38 @@ export function usePoseOverlay({ enabled, videoRef }: UsePoseOverlayOptions): Us
       detectorRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!garmentSrc) {
+      garmentImageRef.current = null;
+      setGarmentMessage("Upload a garment image to place a real asset on the torso region.");
+      return;
+    }
+
+    let mounted = true;
+    const image = new Image();
+    image.onload = () => {
+      if (!mounted) {
+        return;
+      }
+
+      garmentImageRef.current = image;
+      setGarmentMessage("Garment image loaded and ready for live placement.");
+    };
+    image.onerror = () => {
+      if (!mounted) {
+        return;
+      }
+
+      garmentImageRef.current = null;
+      setGarmentMessage("Unable to load this garment image. Try a different file.");
+    };
+    image.src = garmentSrc;
+
+    return () => {
+      mounted = false;
+    };
+  }, [garmentSrc]);
 
   useEffect(() => {
     if (!enabled) {
@@ -213,7 +316,7 @@ export function usePoseOverlay({ enabled, videoRef }: UsePoseOverlayOptions): Us
       const poseFrame = detector.estimate(video, timestamp);
 
       if (poseFrame) {
-        drawPoseFrame(context, poseFrame, video);
+        drawPoseFrame(context, poseFrame, video, fitAdjustments, garmentImageRef.current);
       } else {
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
       }
@@ -229,11 +332,12 @@ export function usePoseOverlay({ enabled, videoRef }: UsePoseOverlayOptions): Us
       const context = canvas?.getContext("2d");
       context?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
     };
-  }, [enabled, videoRef]);
+  }, [enabled, fitAdjustments, videoRef]);
 
   return {
     canvasRef,
     detectorMessage,
+    garmentMessage,
     overlayMode
   };
 }

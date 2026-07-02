@@ -1,7 +1,14 @@
-﻿import { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
+import { type FitAdjustments } from "../lib/pose/garmentFit";
 import { useCamera } from "../hooks/useCamera";
 import { usePoseOverlay } from "../hooks/usePoseOverlay";
+
+type CameraPreviewProps = {
+  fitAdjustments: FitAdjustments;
+  garmentName: string | null;
+  garmentSrc: string | null;
+};
 
 const statusCopy = {
   error: "Camera unavailable",
@@ -10,12 +17,14 @@ const statusCopy = {
   requesting: "Requesting access"
 } as const;
 
-export function CameraPreview() {
+export function CameraPreview({ fitAdjustments, garmentName, garmentSrc }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
-  const { canvasRef, detectorMessage, overlayMode } = usePoseOverlay({
+  const { canvasRef, detectorMessage, garmentMessage, overlayMode } = usePoseOverlay({
     enabled: status === "live",
+    fitAdjustments,
+    garmentSrc,
     videoRef
   });
 
@@ -77,8 +86,9 @@ export function CameraPreview() {
         ) : null}
       </div>
 
-      <div className="camera-card__footer">
+      <div className="camera-card__footer camera-card__footer--stacked">
         <p>{detectorMessage}</p>
+        <p>{garmentName ? `Loaded garment: ${garmentName}` : garmentMessage}</p>
       </div>
     </div>
   );

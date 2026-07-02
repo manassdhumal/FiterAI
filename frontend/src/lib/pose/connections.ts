@@ -1,4 +1,4 @@
-﻿import type { PoseConnection } from "./types";
+import type { PoseConnection } from "./types";
 
 export const poseConnections: PoseConnection[] = [
   ["leftShoulder", "rightShoulder"],
