@@ -334,6 +334,103 @@ function paintMeshWarpedGarment(
   context.restore();
 }
 
+// Scans one row of the live segmentation mask for the real left/right body
+// edges, within a search window around the landmark-derived guess (bounded
+// so it can't wander onto an outstretched arm or background noise).
+export function sampleSilhouetteRowEdges(
+  mask: SegmentationMask,
+  canvasY: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  expectedLeftX: number,
+  expectedRightX: number
+): { left: number; right: number } | null {
+  const maskY = Math.round((canvasY / canvasHeight) * mask.height);
+
+  if (maskY < 0 || maskY >= mask.height) {
+    return null;
+  }
+
+  const expectedCenterX = (expectedLeftX + expectedRightX) / 2;
+  const expectedHalfWidth = Math.max(1, (expectedRightX - expectedLeftX) / 2);
+  const searchHalfWidth = expectedHalfWidth * 1.8;
+  const searchLeftX = Math.max(0, expectedCenterX - searchHalfWidth);
+  const searchRightX = Math.min(canvasWidth, expectedCenterX + searchHalfWidth);
+
+  const maskSearchLeft = Math.max(0, Math.round((searchLeftX / canvasWidth) * mask.width));
+  const maskSearchRight = Math.min(mask.width - 1, Math.round((searchRightX / canvasWidth) * mask.width));
+
+  const threshold = 0.5;
+  const rowOffset = maskY * mask.width;
+  let minX = -1;
+  let maxX = -1;
+
+  for (let x = maskSearchLeft; x <= maskSearchRight; x += 1) {
+    if (mask.data[rowOffset + x] > threshold) {
+      if (minX === -1) {
+        minX = x;
+      }
+      maxX = x;
+    }
+  }
+
+  if (minX === -1) {
+    return null;
+  }
+
+  return {
+    left: (minX / mask.width) * canvasWidth,
+    right: (maxX / mask.width) * canvasWidth
+  };
+}
+
+// Nudges each mesh row's left/right destination toward the real body
+// silhouette from the live segmentation mask, instead of the fixed
+// landmark-derived proportional guess. Blended (not a hard replace) to
+// damp frame-to-frame mask noise; falls back to the original landmark
+// point whenever a row's silhouette can't be read confidently (too
+// narrow a match, or nothing found in the search window).
+export function refineMeshRowsFromSegmentation(
+  canvasPoints: Point[],
+  segmentationMask: SegmentationMask,
+  canvasWidth: number,
+  canvasHeight: number
+): Point[] {
+  const refined = canvasPoints.map((point) => ({ ...point }));
+  const blendFactor = 0.7;
+  const minValidRowWidth = 8;
+
+  garmentMeshRowIndexPairs.forEach(([leftIdx, rightIdx]) => {
+    const leftPoint = canvasPoints[leftIdx];
+    const rightPoint = canvasPoints[rightIdx];
+    const rowY = (leftPoint.y + rightPoint.y) / 2;
+
+    const edges = sampleSilhouetteRowEdges(
+      segmentationMask,
+      rowY,
+      canvasWidth,
+      canvasHeight,
+      leftPoint.x,
+      rightPoint.x
+    );
+
+    if (!edges || edges.right - edges.left < minValidRowWidth) {
+      return;
+    }
+
+    refined[leftIdx] = {
+      ...refined[leftIdx],
+      x: leftPoint.x + (edges.left - leftPoint.x) * blendFactor
+    };
+    refined[rightIdx] = {
+      ...refined[rightIdx],
+      x: rightPoint.x + (edges.right - rightPoint.x) * blendFactor
+    };
+  });
+
+  return refined;
+}
+
 function paintSegmentationMask(maskCanvas: HTMLCanvasElement, mask: SegmentationMask) {
   if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
     maskCanvas.width = mask.width;
@@ -430,9 +527,19 @@ function drawGarmentImage(
       // Draw the garment's real silhouette into an offscreen buffer, then
       // intersect it with the live body segmentation mask so the garment is
       // only visible where the real body actually is, not just inside the
-      // landmark-derived guide box.
+      // landmark-derived guide box. The mesh rows themselves are also bent
+      // toward the segmentation mask's real per-row body width first, so the
+      // garment's internal contour (not just its outer edge) follows the
+      // actual silhouette instead of a generic proportional guess.
+      const meshPoints = refineMeshRowsFromSegmentation(
+        canvasPoints,
+        segmentationMask,
+        context.canvas.width,
+        context.canvas.height
+      );
+
       bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
-      paintMeshWarpedGarment(bufferContext, garmentImage, canvasPoints, garmentBounds, 1);
+      paintMeshWarpedGarment(bufferContext, garmentImage, meshPoints, garmentBounds, 1);
       paintSegmentationMask(maskCanvas, segmentationMask);
 
       bufferContext.globalCompositeOperation = "destination-in";
