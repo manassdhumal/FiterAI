@@ -431,6 +431,57 @@ export function refineMeshRowsFromSegmentation(
   return refined;
 }
 
+// Blends a soft, blurred sample of the live video's own luminance onto the
+// garment so it picks up the room's actual lighting (dims in shadow, brightens
+// under light) instead of sitting on top as a flat, unlit cutout. Clipped to
+// the garment's own placement polygon so the effect can't spill onto the
+// background - safe to call before the segmentation destination-in step,
+// which re-clips to the exact body silhouette afterward anyway.
+export function paintSceneLighting(
+  context: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  lightingCanvas: HTMLCanvasElement,
+  clipPoints: Point[],
+  intensity: number
+) {
+  const lightWidth = 48;
+  const lightHeight = 64;
+
+  if (lightingCanvas.width !== lightWidth || lightingCanvas.height !== lightHeight) {
+    lightingCanvas.width = lightWidth;
+    lightingCanvas.height = lightHeight;
+  }
+
+  const lightContext = lightingCanvas.getContext("2d");
+  if (!lightContext || clipPoints.length === 0) {
+    return;
+  }
+
+  lightContext.save();
+  lightContext.filter = "grayscale(1) blur(3px)";
+  lightContext.drawImage(video, 0, 0, lightWidth, lightHeight);
+  lightContext.restore();
+
+  context.save();
+  context.beginPath();
+  clipPoints.forEach((point, index) => {
+    if (index === 0) {
+      context.moveTo(point.x, point.y);
+    } else {
+      context.lineTo(point.x, point.y);
+    }
+  });
+  context.closePath();
+  context.clip();
+
+  context.globalCompositeOperation = "soft-light";
+  context.globalAlpha = intensity;
+  context.drawImage(lightingCanvas, 0, 0, context.canvas.width, context.canvas.height);
+  context.globalCompositeOperation = "source-over";
+  context.globalAlpha = 1;
+  context.restore();
+}
+
 function paintSegmentationMask(maskCanvas: HTMLCanvasElement, mask: SegmentationMask) {
   if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
     maskCanvas.width = mask.width;
@@ -463,7 +514,9 @@ function drawGarmentImage(
   scaleY: number,
   useNaturalGarmentShape: boolean,
   segmentationBuffers: SegmentationBuffers | null,
-  garmentBounds: GarmentBounds | null
+  garmentBounds: GarmentBounds | null,
+  video: HTMLVideoElement,
+  lightingCanvas: HTMLCanvasElement
 ): boolean {
   const placement = createGarmentPlacement(frame, fitAdjustments);
 
@@ -540,6 +593,9 @@ function drawGarmentImage(
 
       bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
       paintMeshWarpedGarment(bufferContext, garmentImage, meshPoints, garmentBounds, 1);
+      if (video.videoWidth && video.videoHeight) {
+        paintSceneLighting(bufferContext, video, lightingCanvas, meshPoints, 0.35);
+      }
       paintSegmentationMask(maskCanvas, segmentationMask);
 
       bufferContext.globalCompositeOperation = "destination-in";
@@ -577,7 +633,8 @@ function drawPoseFrame(
   garmentImage: HTMLImageElement | null,
   useNaturalGarmentShape: boolean,
   segmentationBuffers: SegmentationBuffers | null,
-  garmentBounds: GarmentBounds | null
+  garmentBounds: GarmentBounds | null,
+  lightingCanvas: HTMLCanvasElement
 ) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
@@ -600,7 +657,9 @@ function drawPoseFrame(
         scaleY,
         useNaturalGarmentShape,
         segmentationBuffers,
-        garmentBounds
+        garmentBounds,
+        video,
+        lightingCanvas
       )
     : false;
 
@@ -640,6 +699,7 @@ export function usePoseOverlay({
   const garmentBoundsRef = useRef<GarmentBounds | null>(null);
   const bufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lightingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const segmentationAvailableRef = useRef(false);
   const landmarkHistoryRef = useRef<LandmarkHistory | null>(null);
   const [overlayMode, setOverlayMode] = useState<DetectorMode>("mock");
@@ -761,6 +821,9 @@ export function usePoseOverlay({
         if (!maskCanvasRef.current) {
           maskCanvasRef.current = document.createElement("canvas");
         }
+        if (!lightingCanvasRef.current) {
+          lightingCanvasRef.current = document.createElement("canvas");
+        }
 
         const segmentationAvailable = Boolean(poseFrame.segmentationMask);
         if (segmentationAvailableRef.current !== segmentationAvailable) {
@@ -783,7 +846,8 @@ export function usePoseOverlay({
             bufferCanvas: bufferCanvasRef.current,
             maskCanvas: maskCanvasRef.current
           },
-          garmentBoundsRef.current
+          garmentBoundsRef.current,
+          lightingCanvasRef.current
         );
       } else {
         landmarkHistoryRef.current = null;
