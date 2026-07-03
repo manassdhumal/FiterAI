@@ -34,6 +34,7 @@ async def intake_garment(file: UploadFile = File(...)) -> GarmentIntakeResponse:
         height=result.height,
         mask_coverage_ratio=result.mask_coverage_ratio,
         had_transparent_source=result.had_transparent_source,
+        was_worn_photo=result.was_worn_photo,
         original_url=result.original_url,
         clean_url=result.clean_url,
     )

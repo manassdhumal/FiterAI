@@ -6,3 +6,4 @@ pillow>=11,<13
 numpy>=2.2,<3
 rembg==2.0.76
 onnxruntime>=1.19
+opencv-python-headless==4.13.0.92

@@ -141,7 +141,9 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
             status: "ready",
             statusMessage: result.hadTransparentSource
               ? "Background already transparent. Garment normalized for fitting."
-              : "Background removed and garment normalized for fitting."
+              : result.wasWornPhoto
+                ? "Detected a person in this photo - isolated just the garment from them."
+                : "Background removed and garment normalized for fitting."
           };
         });
       })

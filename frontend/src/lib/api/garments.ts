@@ -5,6 +5,7 @@ export type GarmentIntakeResult = {
   maskCoverageRatio: number;
   originalFilename: string;
   originalUrl: string;
+  wasWornPhoto: boolean;
 };
 
 type GarmentIntakeResponse = {
@@ -16,6 +17,7 @@ type GarmentIntakeResponse = {
   original_url: string;
   source_type: string;
   status: string;
+  was_worn_photo: boolean;
 };
 
 export async function uploadGarment(file: File): Promise<GarmentIntakeResult> {
@@ -40,6 +42,7 @@ export async function uploadGarment(file: File): Promise<GarmentIntakeResult> {
     hadTransparentSource: data.had_transparent_source,
     maskCoverageRatio: data.mask_coverage_ratio,
     originalFilename: data.original_filename,
-    originalUrl: data.original_url
+    originalUrl: data.original_url,
+    wasWornPhoto: data.was_worn_photo
   };
 }

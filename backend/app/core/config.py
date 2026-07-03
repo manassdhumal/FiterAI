@@ -14,6 +14,7 @@ class Settings(BaseModel):
     data_url_prefix: str = "/data"
 
     rembg_model_name: str = "u2net"
+    rembg_cloth_model_name: str = "u2net_cloth_seg"
     garment_canvas_size: int = 1024
     garment_canvas_padding_ratio: float = 0.06
 
