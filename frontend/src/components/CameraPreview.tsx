@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { type FitAdjustments } from "../lib/pose/garmentFit";
 import { useCamera } from "../hooks/useCamera";
 import { usePoseOverlay } from "../hooks/usePoseOverlay";
+import { MirrorIcon, VideoIcon, VideoOffIcon } from "./icons";
 
 type SnapshotPayload = {
   createdAt: string;
@@ -19,9 +20,16 @@ type CameraPreviewProps = {
 
 const statusCopy = {
   error: "Camera unavailable",
-  idle: "Camera offline",
+  idle: "Camera off",
   live: "Camera live",
   requesting: "Requesting access"
+} as const;
+
+const statusPillVariant = {
+  error: "danger",
+  idle: "idle",
+  live: "success",
+  requesting: "warning"
 } as const;
 
 export function CameraPreview({
@@ -101,30 +109,6 @@ export function CameraPreview({
 
   return (
     <div className="camera-card">
-      <div className="camera-card__toolbar">
-        <div className="camera-card__status-group">
-          <span className={`camera-badge camera-badge--${status}`}>{statusCopy[status]}</span>
-          <span className="camera-badge camera-badge--overlay">{overlayMode} overlay</span>
-        </div>
-        <div className="camera-card__actions">
-          <button type="button" onClick={toggleMirror} className="button--ghost">
-            {isMirrored ? "Mirror on" : "Mirror off"}
-          </button>
-          <button type="button" onClick={captureLook} disabled={status !== "live"}>
-            Capture Look
-          </button>
-          {status === "live" ? (
-            <button type="button" onClick={stopCamera}>
-              Stop Camera
-            </button>
-          ) : (
-            <button type="button" onClick={() => void startCamera()}>
-              Start Camera
-            </button>
-          )}
-        </div>
-      </div>
-
       <div className="camera-stage">
         <video
           ref={videoRef}
@@ -137,22 +121,77 @@ export function CameraPreview({
           ref={canvasRef}
           className={isMirrored ? "camera-canvas camera-canvas--mirrored" : "camera-canvas"}
         />
+
+        <div className="camera-stage__badges">
+          <span className={`pill pill--${statusPillVariant[status]}${status === "live" || status === "requesting" ? " pill--pulse" : ""}`}>
+            <span className="pill__dot" />
+            {statusCopy[status]}
+          </span>
+          {status === "live" ? (
+            <span className="pill pill--accent">
+              <span className="pill__dot" />
+              {overlayMode} overlay
+            </span>
+          ) : null}
+        </div>
+
+        <span className="camera-stage__mirror-label">{isMirrored ? "mirrored" : "true view"}</span>
+        <span className="camera-stage__bracket camera-stage__bracket--tl" aria-hidden="true" />
+        <span className="camera-stage__bracket camera-stage__bracket--br" aria-hidden="true" />
+
         {status !== "live" ? (
           <div className="camera-overlay">
             <div>
-              <strong>Live mirror preview</strong>
+              <span className="camera-overlay__icon">
+                <VideoOffIcon />
+              </span>
+              <strong>Camera is off</strong>
               <p>
                 {status === "requesting"
                   ? "Waiting for webcam permission..."
                   : "Start the camera to test the live try-on surface."}
               </p>
-              {error ? <span>{error}</span> : null}
+              {error ? <span className="error-text">{error}</span> : null}
             </div>
           </div>
         ) : null}
       </div>
 
-      <div className="camera-card__footer camera-card__footer--stacked">
+      <div className="camera-card__actions">
+        {status === "live" ? (
+          <button type="button" className="button--danger" onClick={stopCamera}>
+            <VideoOffIcon size={17} />
+            Stop camera
+          </button>
+        ) : (
+          <button type="button" onClick={() => void startCamera()}>
+            <VideoIcon size={17} />
+            Start camera
+          </button>
+        )}
+
+        <div className="camera-card__actions-row">
+          <button type="button" onClick={toggleMirror} className="icon-button">
+            <MirrorIcon />
+            Mirror {isMirrored ? "on" : "off"}
+          </button>
+        </div>
+
+        <button type="button" className="button--capture" onClick={captureLook} disabled={status !== "live"}>
+          <span
+            style={{
+              border: "2.5px solid currentColor",
+              borderRadius: "999px",
+              display: "inline-block",
+              height: "15px",
+              width: "15px"
+            }}
+          />
+          Capture look
+        </button>
+      </div>
+
+      <div className="camera-card__footer">
         <p>{detectorMessage}</p>
         <p>{garmentName ? `Loaded garment: ${garmentName}` : garmentMessage}</p>
         {useNaturalGarmentShape && status === "live" ? <p>{segmentationMessage}</p> : null}
