@@ -6,7 +6,7 @@ from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 from app.services.garment_intake.background_removal import extract_garment_from_worn_photo, remove_background
-from app.services.garment_intake.mask_utils import mask_coverage_ratio, normalize_onto_canvas
+from app.services.garment_intake.mask_utils import clean_alpha_edge, mask_coverage_ratio, normalize_onto_canvas
 from app.services.garment_intake.person_detection import contains_person_face
 
 
@@ -59,8 +59,12 @@ def process_garment_upload(raw_bytes: bytes, original_filename: str) -> GarmentI
     else:
         background_removed = remove_background(source_image)
 
+    # Strip the thin colour-fringed ring background-removal models leave
+    # behind (the classic "cut and paste" tell) before normalizing.
+    defringed = clean_alpha_edge(background_removed)
+
     clean_image = normalize_onto_canvas(
-        background_removed,
+        defringed,
         canvas_size=settings.garment_canvas_size,
         padding_ratio=settings.garment_canvas_padding_ratio,
     )

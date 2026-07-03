@@ -1,6 +1,18 @@
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ALPHA_OPAQUE_THRESHOLD = 12
+
+
+def clean_alpha_edge(image: Image.Image, erode_size: int = 3, feather_radius: float = 1.0) -> Image.Image:
+    """Background-removal models typically leave a thin ring of pixels around
+    the cutout tinted by the original background (colour fringing) - the
+    classic "cut and paste" tell. Eroding the alpha mask by a pixel or two
+    strips that contaminated ring, then a light blur re-softens the now-hard
+    edge instead of leaving a harsh cutout."""
+    red, green, blue, alpha = image.convert("RGBA").split()
+    eroded_alpha = alpha.filter(ImageFilter.MinFilter(erode_size))
+    softened_alpha = eroded_alpha.filter(ImageFilter.GaussianBlur(feather_radius))
+    return Image.merge("RGBA", (red, green, blue, softened_alpha))
 
 
 def alpha_bounding_box(image: Image.Image) -> tuple[int, int, int, int] | None:

@@ -30,6 +30,55 @@ type GarmentBounds = {
   top: number;
 };
 
+type MeshRow = {
+  left: Point;
+  right: Point;
+  sourceFraction: number;
+};
+
+// Number of interpolated rows inserted between each pair of adjacent anchor
+// rows when a segmentation mask is available to refine them - 2 per gap
+// across 4 gaps takes the mesh from 5 rows to 13, so the garment can trace
+// real body curvature (chest, waist, hips) instead of linearly interpolating
+// across large gaps between sparse landmark-derived anchors.
+const DENSE_ROW_SUBDIVISIONS_PER_GAP = 2;
+
+function lerpPoint(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+export function buildAnchorMeshRows(canvasPoints: Point[]): MeshRow[] {
+  return garmentMeshRowIndexPairs.map(([leftIdx, rightIdx], index) => ({
+    left: canvasPoints[leftIdx],
+    right: canvasPoints[rightIdx],
+    sourceFraction: garmentMeshRowSourceFractions[index]
+  }));
+}
+
+export function densifyMeshRows(anchorRows: MeshRow[], subdivisionsPerGap: number): MeshRow[] {
+  const dense: MeshRow[] = [];
+
+  anchorRows.forEach((row, index) => {
+    dense.push(row);
+    const next = anchorRows[index + 1];
+
+    if (!next) {
+      return;
+    }
+
+    for (let step = 1; step <= subdivisionsPerGap; step += 1) {
+      const t = step / (subdivisionsPerGap + 1);
+      dense.push({
+        left: lerpPoint(row.left, next.left, t),
+        right: lerpPoint(row.right, next.right, t),
+        sourceFraction: row.sourceFraction + (next.sourceFraction - row.sourceFraction) * t
+      });
+    }
+  });
+
+  return dense;
+}
+
 type UsePoseOverlayOptions = {
   enabled: boolean;
   fitAdjustments: FitAdjustments;
@@ -278,7 +327,7 @@ function paintWarpedTriangle(
 function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
-  canvasPoints: Point[],
+  rows: MeshRow[],
   garmentBounds: GarmentBounds | null,
   alpha: number
 ) {
@@ -300,17 +349,12 @@ function paintMeshWarpedGarment(
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
 
-  for (let rowIndex = 0; rowIndex < garmentMeshRowIndexPairs.length - 1; rowIndex += 1) {
-    const [topLeftIdx, topRightIdx] = garmentMeshRowIndexPairs[rowIndex];
-    const [bottomLeftIdx, bottomRightIdx] = garmentMeshRowIndexPairs[rowIndex + 1];
+  for (let rowIndex = 0; rowIndex < rows.length - 1; rowIndex += 1) {
+    const top = rows[rowIndex];
+    const bottom = rows[rowIndex + 1];
 
-    const topLeft = canvasPoints[topLeftIdx];
-    const topRight = canvasPoints[topRightIdx];
-    const bottomLeft = canvasPoints[bottomLeftIdx];
-    const bottomRight = canvasPoints[bottomRightIdx];
-
-    const sourceTopY = contentTop + garmentMeshRowSourceFractions[rowIndex] * contentHeight;
-    const sourceBottomY = contentTop + garmentMeshRowSourceFractions[rowIndex + 1] * contentHeight;
+    const sourceTopY = contentTop + top.sourceFraction * contentHeight;
+    const sourceBottomY = contentTop + bottom.sourceFraction * contentHeight;
 
     const sourceTopLeft = { x: contentLeft, y: sourceTopY };
     const sourceTopRight = { x: contentRight, y: sourceTopY };
@@ -321,13 +365,13 @@ function paintMeshWarpedGarment(
       context,
       garmentImage,
       [sourceTopLeft, sourceTopRight, sourceBottomLeft],
-      [topLeft, topRight, bottomLeft]
+      [top.left, top.right, bottom.left]
     );
     paintWarpedTriangle(
       context,
       garmentImage,
       [sourceTopRight, sourceBottomRight, sourceBottomLeft],
-      [topRight, bottomRight, bottomLeft]
+      [top.right, bottom.right, bottom.left]
     );
   }
 
@@ -391,44 +435,36 @@ export function sampleSilhouetteRowEdges(
 // point whenever a row's silhouette can't be read confidently (too
 // narrow a match, or nothing found in the search window).
 export function refineMeshRowsFromSegmentation(
-  canvasPoints: Point[],
+  rows: MeshRow[],
   segmentationMask: SegmentationMask,
   canvasWidth: number,
   canvasHeight: number
-): Point[] {
-  const refined = canvasPoints.map((point) => ({ ...point }));
+): MeshRow[] {
   const blendFactor = 0.7;
   const minValidRowWidth = 8;
 
-  garmentMeshRowIndexPairs.forEach(([leftIdx, rightIdx]) => {
-    const leftPoint = canvasPoints[leftIdx];
-    const rightPoint = canvasPoints[rightIdx];
-    const rowY = (leftPoint.y + rightPoint.y) / 2;
+  return rows.map((row) => {
+    const rowY = (row.left.y + row.right.y) / 2;
 
     const edges = sampleSilhouetteRowEdges(
       segmentationMask,
       rowY,
       canvasWidth,
       canvasHeight,
-      leftPoint.x,
-      rightPoint.x
+      row.left.x,
+      row.right.x
     );
 
     if (!edges || edges.right - edges.left < minValidRowWidth) {
-      return;
+      return row;
     }
 
-    refined[leftIdx] = {
-      ...refined[leftIdx],
-      x: leftPoint.x + (edges.left - leftPoint.x) * blendFactor
-    };
-    refined[rightIdx] = {
-      ...refined[rightIdx],
-      x: rightPoint.x + (edges.right - rightPoint.x) * blendFactor
+    return {
+      ...row,
+      left: { ...row.left, x: row.left.x + (edges.left - row.left.x) * blendFactor },
+      right: { ...row.right, x: row.right.x + (edges.right - row.right.x) * blendFactor }
     };
   });
-
-  return refined;
 }
 
 // Blends a soft, blurred sample of the live video's own luminance onto the
@@ -580,25 +616,32 @@ function drawGarmentImage(
       // Draw the garment's real silhouette into an offscreen buffer, then
       // intersect it with the live body segmentation mask so the garment is
       // only visible where the real body actually is, not just inside the
-      // landmark-derived guide box. The mesh rows themselves are also bent
-      // toward the segmentation mask's real per-row body width first, so the
-      // garment's internal contour (not just its outer edge) follows the
-      // actual silhouette instead of a generic proportional guess.
-      const meshPoints = refineMeshRowsFromSegmentation(
-        canvasPoints,
+      // landmark-derived guide box. The mesh itself is also densified (5
+      // anchor rows -> 13) and each row bent toward the segmentation mask's
+      // real per-row body width, so the garment's internal contour follows
+      // real body curvature instead of linearly interpolating across large
+      // gaps between a few sparse landmark-derived anchors.
+      const denseRows = densifyMeshRows(buildAnchorMeshRows(canvasPoints), DENSE_ROW_SUBDIVISIONS_PER_GAP);
+      const meshRows = refineMeshRowsFromSegmentation(
+        denseRows,
         segmentationMask,
         context.canvas.width,
         context.canvas.height
       );
+      const meshOutline = [...meshRows.map((row) => row.left), ...meshRows.slice().reverse().map((row) => row.right)];
 
       bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
-      paintMeshWarpedGarment(bufferContext, garmentImage, meshPoints, garmentBounds, 1);
+      paintMeshWarpedGarment(bufferContext, garmentImage, meshRows, garmentBounds, 1);
       if (video.videoWidth && video.videoHeight) {
-        paintSceneLighting(bufferContext, video, lightingCanvas, meshPoints, 0.35);
+        paintSceneLighting(bufferContext, video, lightingCanvas, meshOutline, 0.35);
       }
       paintSegmentationMask(maskCanvas, segmentationMask);
 
       bufferContext.globalCompositeOperation = "destination-in";
+      // A couple of blurred pixels at the cutout edge reads as fabric meeting
+      // skin/background, instead of the harsh, hard-edged "sticker" look of
+      // an unblurred alpha cutout.
+      bufferContext.filter = "blur(2px)";
       bufferContext.drawImage(
         maskCanvas,
         0,
@@ -610,6 +653,7 @@ function drawGarmentImage(
         bufferCanvas.width,
         bufferCanvas.height
       );
+      bufferContext.filter = "none";
       bufferContext.globalCompositeOperation = "source-over";
 
       context.save();
@@ -621,7 +665,7 @@ function drawGarmentImage(
     }
   }
 
-  paintMeshWarpedGarment(context, garmentImage, canvasPoints, garmentBounds, 0.92);
+  paintMeshWarpedGarment(context, garmentImage, buildAnchorMeshRows(canvasPoints), garmentBounds, 0.92);
   return true;
 }
 
