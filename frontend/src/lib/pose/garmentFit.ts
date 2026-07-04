@@ -98,16 +98,34 @@ function rotatePoint(point: Point, center: Point, radians: number): Point {
 }
 
 export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null {
-  const leftShoulder = byId(frame, "leftShoulder");
-  const rightShoulder = byId(frame, "rightShoulder");
-  const leftHip = byId(frame, "leftHip");
-  const rightHip = byId(frame, "rightHip");
-  const leftElbow = byId(frame, "leftElbow");
-  const rightElbow = byId(frame, "rightElbow");
+  const leftShoulderRaw = byId(frame, "leftShoulder");
+  const rightShoulderRaw = byId(frame, "rightShoulder");
+  const leftHipRaw = byId(frame, "leftHip");
+  const rightHipRaw = byId(frame, "rightHip");
+  const leftElbowRaw = byId(frame, "leftElbow");
+  const rightElbowRaw = byId(frame, "rightElbow");
 
-  if (!leftShoulder || !rightShoulder || !leftHip || !rightHip) {
+  if (!leftShoulderRaw || !rightShoulderRaw || !leftHipRaw || !rightHipRaw) {
     return null;
   }
+
+  // MediaPipe's left/right landmarks are the subject's own anatomical
+  // sides, which land on opposite sides of the raw camera frame depending
+  // on whether the person is facing the camera or has turned around (a
+  // person facing the camera has their anatomical right shoulder appear on
+  // the smaller-x side of the frame, like any normal, unmirrored photo of
+  // someone facing you). Everything below assumes screen-space left/right
+  // (smaller x = left) instead, so landmarks are normalized to that before
+  // use - without this, shoulderWidth goes negative and this whole function
+  // fails silently for anyone facing the camera normally (the common case),
+  // only "working" by coincidence when facing away.
+  const facesScreenNormally = rightShoulderRaw.x >= leftShoulderRaw.x;
+  const leftShoulder = facesScreenNormally ? leftShoulderRaw : rightShoulderRaw;
+  const rightShoulder = facesScreenNormally ? rightShoulderRaw : leftShoulderRaw;
+  const leftHip = facesScreenNormally ? leftHipRaw : rightHipRaw;
+  const rightHip = facesScreenNormally ? rightHipRaw : leftHipRaw;
+  const leftElbow = facesScreenNormally ? leftElbowRaw : rightElbowRaw;
+  const rightElbow = facesScreenNormally ? rightElbowRaw : leftElbowRaw;
 
   const shoulderWidth = rightShoulder.x - leftShoulder.x;
   const torsoHeight = Math.max(leftHip.y, rightHip.y) - Math.min(leftShoulder.y, rightShoulder.y);
