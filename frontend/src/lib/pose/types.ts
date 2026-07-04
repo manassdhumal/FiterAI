@@ -1,17 +1,42 @@
+// The full 33-point MediaPipe BlazePose topology (previously only 13 of
+// these were used) - face/hand/foot detail included so the on-screen
+// skeleton reads as a denser, more connected body tracker rather than a
+// sparse stick figure. Garment fitting (garmentFit.ts) only ever reads the
+// shoulders/hips/elbows subset, so this is purely additive for the rest.
 export type PoseLandmarkId =
   | "nose"
+  | "leftEyeInner"
+  | "leftEye"
+  | "leftEyeOuter"
+  | "rightEyeInner"
+  | "rightEye"
+  | "rightEyeOuter"
+  | "leftEar"
+  | "rightEar"
+  | "mouthLeft"
+  | "mouthRight"
   | "leftShoulder"
   | "rightShoulder"
   | "leftElbow"
   | "rightElbow"
   | "leftWrist"
   | "rightWrist"
+  | "leftPinky"
+  | "rightPinky"
+  | "leftIndex"
+  | "rightIndex"
+  | "leftThumb"
+  | "rightThumb"
   | "leftHip"
   | "rightHip"
   | "leftKnee"
   | "rightKnee"
   | "leftAnkle"
-  | "rightAnkle";
+  | "rightAnkle"
+  | "leftHeel"
+  | "rightHeel"
+  | "leftFootIndex"
+  | "rightFootIndex";
 
 export type PoseLandmark = {
   confidence: number;

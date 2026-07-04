@@ -34,20 +34,52 @@ export function estimateMockPoseFrame(video: HTMLVideoElement, timestamp: number
   const elbowDrop = height * 0.12;
   const wristDrop = height * 0.18;
 
+  const noseY = height * 0.16;
+  const eyeY = noseY - height * 0.012;
+  const mouthY = noseY + height * 0.018;
+  const halfEyeInner = width * 0.012;
+  const halfEyeOuter = width * 0.022;
+  const halfEar = width * 0.032;
+  const halfMouth = width * 0.01;
+  const wristX = { left: centerX - halfShoulder * 1.4, right: centerX + halfShoulder * 1.4 };
+  const wristY = shoulderY + wristDrop;
+  const heelDrop = height * 0.02;
+  const footForwardX = width * 0.02;
+
   const landmarks = [
-    createLandmark("nose", centerX, height * 0.16),
+    createLandmark("nose", centerX, noseY),
+    createLandmark("leftEyeInner", centerX - halfEyeInner, eyeY),
+    createLandmark("leftEye", centerX - halfEyeInner * 1.6, eyeY),
+    createLandmark("leftEyeOuter", centerX - halfEyeOuter, eyeY),
+    createLandmark("rightEyeInner", centerX + halfEyeInner, eyeY),
+    createLandmark("rightEye", centerX + halfEyeInner * 1.6, eyeY),
+    createLandmark("rightEyeOuter", centerX + halfEyeOuter, eyeY),
+    createLandmark("leftEar", centerX - halfEar, noseY),
+    createLandmark("rightEar", centerX + halfEar, noseY),
+    createLandmark("mouthLeft", centerX - halfMouth, mouthY),
+    createLandmark("mouthRight", centerX + halfMouth, mouthY),
     createLandmark("leftShoulder", centerX - halfShoulder, shoulderY),
     createLandmark("rightShoulder", centerX + halfShoulder, shoulderY),
     createLandmark("leftElbow", centerX - halfShoulder * 1.25, shoulderY + elbowDrop),
     createLandmark("rightElbow", centerX + halfShoulder * 1.25, shoulderY + elbowDrop),
-    createLandmark("leftWrist", centerX - halfShoulder * 1.4, shoulderY + wristDrop),
-    createLandmark("rightWrist", centerX + halfShoulder * 1.4, shoulderY + wristDrop),
+    createLandmark("leftWrist", wristX.left, wristY),
+    createLandmark("rightWrist", wristX.right, wristY),
+    createLandmark("leftPinky", wristX.left - width * 0.014, wristY + height * 0.02),
+    createLandmark("rightPinky", wristX.right + width * 0.014, wristY + height * 0.02),
+    createLandmark("leftIndex", wristX.left - width * 0.006, wristY + height * 0.026),
+    createLandmark("rightIndex", wristX.right + width * 0.006, wristY + height * 0.026),
+    createLandmark("leftThumb", wristX.left + width * 0.01, wristY + height * 0.012),
+    createLandmark("rightThumb", wristX.right - width * 0.01, wristY + height * 0.012),
     createLandmark("leftHip", centerX - halfHip, hipY),
     createLandmark("rightHip", centerX + halfHip, hipY),
     createLandmark("leftKnee", centerX - halfHip * 0.9, kneeY),
     createLandmark("rightKnee", centerX + halfHip * 0.9, kneeY),
     createLandmark("leftAnkle", centerX - halfHip * 0.85, ankleY),
-    createLandmark("rightAnkle", centerX + halfHip * 0.85, ankleY)
+    createLandmark("rightAnkle", centerX + halfHip * 0.85, ankleY),
+    createLandmark("leftHeel", centerX - halfHip * 0.85, ankleY + heelDrop),
+    createLandmark("rightHeel", centerX + halfHip * 0.85, ankleY + heelDrop),
+    createLandmark("leftFootIndex", centerX - halfHip * 0.85 - footForwardX, ankleY + heelDrop),
+    createLandmark("rightFootIndex", centerX + halfHip * 0.85 + footForwardX, ankleY + heelDrop)
   ];
 
   return {
