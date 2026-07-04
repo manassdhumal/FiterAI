@@ -1,6 +1,6 @@
 import { poseConnections } from "./connections";
 import type { DetectorMode, PoseDetector } from "./poseDetector";
-import type { PoseFrame, PoseLandmark, PoseLandmarkId, SegmentationMask } from "./types";
+import type { PoseFrame, PoseLandmark, PoseLandmark3d, PoseLandmarkId, SegmentationMask } from "./types";
 
 type MediaPipeTasksVisionModule = {
   FilesetResolver: {
@@ -25,6 +25,7 @@ type MediaPipeTasksVisionModule = {
 type MediaPipeNormalizedLandmark = {
   x: number;
   y: number;
+  z?: number;
   visibility?: number;
 };
 
@@ -37,6 +38,7 @@ type MediaPipeMask = {
 
 type MediaPipePoseResult = {
   landmarks?: MediaPipeNormalizedLandmark[][];
+  worldLandmarks?: MediaPipeNormalizedLandmark[][];
   segmentationMasks?: MediaPipeMask[];
 };
 
@@ -93,6 +95,23 @@ function toPoseLandmarks(source: MediaPipeNormalizedLandmark[]): PoseLandmark[] 
       id,
       x: candidate?.x ?? 0,
       y: candidate?.y ?? 0
+    };
+  });
+}
+
+// worldLandmarks are already real-scale meters (hip-centered), unlike
+// `landmarks` which are normalized image-space and need reprojection -
+// so this is a straight passthrough, no width/height scaling.
+function toPoseLandmarks3d(source: MediaPipeNormalizedLandmark[]): PoseLandmark3d[] {
+  return landmarkMap.map((id) => {
+    const candidate = source[mediapipeIndices[id]];
+
+    return {
+      confidence: candidate?.visibility ?? 0.8,
+      id,
+      x: candidate?.x ?? 0,
+      y: candidate?.y ?? 0,
+      z: candidate?.z ?? 0
     };
   });
 }
@@ -158,10 +177,15 @@ export async function createMediaPipeDetector(): Promise<PoseDetector> {
         y: landmark.y * height
       }));
 
+      const sourceWorldLandmarks = result.worldLandmarks?.[0];
+
       return {
         connections: poseConnections,
         landmarks: normalized,
-        segmentationMask: extractSegmentationMask(result)
+        segmentationMask: extractSegmentationMask(result),
+        worldLandmarks: sourceWorldLandmarks?.length
+          ? toPoseLandmarks3d(sourceWorldLandmarks)
+          : undefined
       } satisfies PoseFrame;
     },
     kind: "mediapipe" satisfies DetectorMode,

@@ -12,25 +12,29 @@ import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
 import {
   DEFAULT_LANDMARK_SMOOTHING_FACTOR,
+  DEFAULT_LANDMARK_SMOOTHING_FACTOR_Z,
   smoothLandmarks,
+  smoothLandmarks3d,
   toLandmarkHistory,
-  type LandmarkHistory
+  toLandmarkHistory3d,
+  type LandmarkHistory,
+  type LandmarkHistory3d
 } from "../lib/pose/smoothing";
-import type { PoseFrame, PoseLandmark, SegmentationMask } from "../lib/pose/types";
+import type { PoseFrame, PoseLandmark, PoseLandmark3d, SegmentationMask } from "../lib/pose/types";
 
 type SegmentationBuffers = {
   bufferCanvas: HTMLCanvasElement;
   maskCanvas: HTMLCanvasElement;
 };
 
-type GarmentBounds = {
+export type GarmentBounds = {
   bottom: number;
   left: number;
   right: number;
   top: number;
 };
 
-type MeshRow = {
+export type MeshRow = {
   left: Point;
   right: Point;
   sourceFraction: number;
@@ -83,6 +87,11 @@ type UsePoseOverlayOptions = {
   enabled: boolean;
   fitAdjustments: FitAdjustments;
   garmentSrc: string | null;
+  // Invoked once per rendered frame (in addition to this hook's own 2D
+  // drawing) with the same already-smoothed PoseFrame, so a caller can reuse
+  // pose detection (e.g. for a capture-time HQ render) without running it
+  // twice. Null when no pose was detected this frame.
+  onFrame?: (frame: PoseFrame | null) => void;
   useNaturalGarmentShape: boolean;
   videoRef: RefObject<HTMLVideoElement>;
 };
@@ -91,6 +100,10 @@ type UsePoseOverlayResult = {
   canvasRef: MutableRefObject<HTMLCanvasElement | null>;
   detectorMessage: string;
   garmentMessage: string;
+  // The shared blurred/downsampled video-luminance buffer this hook already
+  // populates once per frame for its own 2D lighting blend - exposed so a 3D
+  // overlay can sample the same buffer instead of re-drawing the video.
+  lightingCanvasRef: MutableRefObject<HTMLCanvasElement | null>;
   overlayMode: DetectorMode;
   segmentationMessage: string;
 };
@@ -189,7 +202,7 @@ function drawGarmentGuide(
   context.restore();
 }
 
-function computeOpaqueBounds(image: HTMLImageElement): GarmentBounds | null {
+export function computeOpaqueBounds(image: HTMLImageElement): GarmentBounds | null {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
 
@@ -324,7 +337,7 @@ function paintWarpedTriangle(
   context.restore();
 }
 
-function paintMeshWarpedGarment(
+export function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
   rows: MeshRow[],
@@ -467,36 +480,46 @@ export function refineMeshRowsFromSegmentation(
   });
 }
 
-// Blends a soft, blurred sample of the live video's own luminance onto the
-// garment so it picks up the room's actual lighting (dims in shadow, brightens
-// under light) instead of sitting on top as a flat, unlit cutout. Clipped to
-// the garment's own placement polygon so the effect can't spill onto the
-// background - safe to call before the segmentation destination-in step,
-// which re-clips to the exact body silhouette afterward anyway.
-export function paintSceneLighting(
-  context: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  lightingCanvas: HTMLCanvasElement,
-  clipPoints: Point[],
-  intensity: number
-) {
-  const lightWidth = 48;
-  const lightHeight = 64;
+const LIGHTING_BUFFER_WIDTH = 48;
+const LIGHTING_BUFFER_HEIGHT = 64;
 
-  if (lightingCanvas.width !== lightWidth || lightingCanvas.height !== lightHeight) {
-    lightingCanvas.width = lightWidth;
-    lightingCanvas.height = lightHeight;
+// Redraws a small, blurred, grayscale sample of the live video's own
+// luminance into lightingCanvas. Split out from the blend step below so it
+// can also be called directly by the one-shot HQ capture render
+// (frontend/src/lib/hqRender.ts), which needs its own fresh sample rather
+// than sharing this live pipeline's buffer.
+export function updateLightingBuffer(video: HTMLVideoElement, lightingCanvas: HTMLCanvasElement) {
+  if (lightingCanvas.width !== LIGHTING_BUFFER_WIDTH || lightingCanvas.height !== LIGHTING_BUFFER_HEIGHT) {
+    lightingCanvas.width = LIGHTING_BUFFER_WIDTH;
+    lightingCanvas.height = LIGHTING_BUFFER_HEIGHT;
   }
 
   const lightContext = lightingCanvas.getContext("2d");
-  if (!lightContext || clipPoints.length === 0) {
+  if (!lightContext) {
     return;
   }
 
   lightContext.save();
   lightContext.filter = "grayscale(1) blur(3px)";
-  lightContext.drawImage(video, 0, 0, lightWidth, lightHeight);
+  lightContext.drawImage(video, 0, 0, LIGHTING_BUFFER_WIDTH, LIGHTING_BUFFER_HEIGHT);
   lightContext.restore();
+}
+
+// Blends the already-populated lighting buffer onto the garment so it picks
+// up the room's actual lighting (dims in shadow, brightens under light)
+// instead of sitting on top as a flat, unlit cutout. Clipped to the
+// garment's own placement polygon so the effect can't spill onto the
+// background - safe to call before the segmentation destination-in step,
+// which re-clips to the exact body silhouette afterward anyway.
+export function blendLightingOntoCanvas(
+  context: CanvasRenderingContext2D,
+  lightingCanvas: HTMLCanvasElement,
+  clipPoints: Point[],
+  intensity: number
+) {
+  if (clipPoints.length === 0) {
+    return;
+  }
 
   context.save();
   context.beginPath();
@@ -518,7 +541,7 @@ export function paintSceneLighting(
   context.restore();
 }
 
-function paintSegmentationMask(maskCanvas: HTMLCanvasElement, mask: SegmentationMask) {
+export function paintSegmentationMask(maskCanvas: HTMLCanvasElement, mask: SegmentationMask) {
   if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
     maskCanvas.width = mask.width;
     maskCanvas.height = mask.height;
@@ -633,7 +656,7 @@ function drawGarmentImage(
       bufferContext.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
       paintMeshWarpedGarment(bufferContext, garmentImage, meshRows, garmentBounds, 1);
       if (video.videoWidth && video.videoHeight) {
-        paintSceneLighting(bufferContext, video, lightingCanvas, meshOutline, 0.35);
+        blendLightingOntoCanvas(bufferContext, lightingCanvas, meshOutline, 0.35);
       }
       paintSegmentationMask(maskCanvas, segmentationMask);
 
@@ -686,6 +709,10 @@ function drawPoseFrame(
   const scaleY = context.canvas.height / sourceHeight;
   const landmarksById = new Map(frame.landmarks.map((landmark) => [landmark.id, landmark]));
 
+  if (video.videoWidth && video.videoHeight) {
+    updateLightingBuffer(video, lightingCanvas);
+  }
+
   context.clearRect(0, 0, context.canvas.width, context.canvas.height);
   context.lineWidth = 4;
   context.strokeStyle = "rgba(255, 244, 232, 0.88)";
@@ -734,6 +761,7 @@ export function usePoseOverlay({
   enabled,
   fitAdjustments,
   garmentSrc,
+  onFrame,
   useNaturalGarmentShape,
   videoRef
 }: UsePoseOverlayOptions): UsePoseOverlayResult {
@@ -746,6 +774,12 @@ export function usePoseOverlay({
   const lightingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const segmentationAvailableRef = useRef(false);
   const landmarkHistoryRef = useRef<LandmarkHistory | null>(null);
+  const worldLandmarkHistoryRef = useRef<LandmarkHistory3d | null>(null);
+  // Latest onFrame kept in a ref (rather than the render loop's effect
+  // dependency array) so passing an inline callback doesn't force the
+  // detector/rAF loop to tear down and restart every render.
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
   const [overlayMode, setOverlayMode] = useState<DetectorMode>("mock");
   const [detectorMessage, setDetectorMessage] = useState("Loading pose detector...");
   const [garmentMessage, setGarmentMessage] = useState(
@@ -857,7 +891,27 @@ export function usePoseOverlay({
           smoothingFactor
         );
         landmarkHistoryRef.current = toLandmarkHistory(smoothedLandmarks);
-        const poseFrame: PoseFrame = { ...rawPoseFrame, landmarks: smoothedLandmarks };
+
+        let smoothedWorldLandmarks: PoseLandmark3d[] | undefined;
+        if (rawPoseFrame.worldLandmarks) {
+          const smoothingFactorZ = detector.kind === "mock" ? 1 : DEFAULT_LANDMARK_SMOOTHING_FACTOR_Z;
+          smoothedWorldLandmarks = smoothLandmarks3d(
+            rawPoseFrame.worldLandmarks,
+            worldLandmarkHistoryRef.current,
+            smoothingFactor,
+            smoothingFactorZ
+          );
+          worldLandmarkHistoryRef.current = toLandmarkHistory3d(smoothedWorldLandmarks);
+        } else {
+          worldLandmarkHistoryRef.current = null;
+        }
+
+        const poseFrame: PoseFrame = {
+          ...rawPoseFrame,
+          landmarks: smoothedLandmarks,
+          worldLandmarks: smoothedWorldLandmarks
+        };
+        onFrameRef.current?.(poseFrame);
 
         if (!bufferCanvasRef.current) {
           bufferCanvasRef.current = document.createElement("canvas");
@@ -895,6 +949,8 @@ export function usePoseOverlay({
         );
       } else {
         landmarkHistoryRef.current = null;
+        worldLandmarkHistoryRef.current = null;
+        onFrameRef.current?.(null);
         context.clearRect(0, 0, context.canvas.width, context.canvas.height);
       }
 
@@ -915,6 +971,7 @@ export function usePoseOverlay({
     canvasRef,
     detectorMessage,
     garmentMessage,
+    lightingCanvasRef,
     overlayMode,
     segmentationMessage
   };

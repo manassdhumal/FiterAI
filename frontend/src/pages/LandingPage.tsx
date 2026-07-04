@@ -134,15 +134,21 @@ export function LandingPage({ theme, toggleTheme }: LandingPageProps) {
             </p>
           </article>
 
-          <article className="feature-card feature-card--planned">
+          <article className="feature-card feature-card--live">
             <div className="feature-card__top">
-              <span className="feature-card__icon feature-card__icon--muted">
+              <span className="feature-card__icon">
                 <SparkleIcon />
               </span>
-              <span className="pill pill--outline">COMING SOON</span>
+              <span className="pill pill--success pill--pulse">
+                <span className="pill__dot" />
+                LIVE
+              </span>
             </div>
             <h3>HQ render mode</h3>
-            <p>Cloth-simulated, studio-lit renders of your look — folds, shadows and drape. In the workshop.</p>
+            <p>
+              Capture your look for an instantly sharper render — full camera resolution and denser
+              body-contour tracing than the live preview.
+            </p>
           </article>
         </div>
       </section>

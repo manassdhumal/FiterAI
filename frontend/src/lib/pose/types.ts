@@ -20,6 +20,17 @@ export type PoseLandmark = {
   y: number;
 };
 
+// Real-world 3D coordinates in meters, hip-centered, as provided by
+// MediaPipe's `worldLandmarks` (distinct from the normalized image-space
+// `landmarks` above, which have no true depth/scale information).
+export type PoseLandmark3d = {
+  confidence: number;
+  id: PoseLandmarkId;
+  x: number;
+  y: number;
+  z: number;
+};
+
 export type PoseConnection = [PoseLandmarkId, PoseLandmarkId];
 
 export type SegmentationMask = {
@@ -32,4 +43,5 @@ export type PoseFrame = {
   connections: PoseConnection[];
   landmarks: PoseLandmark[];
   segmentationMask?: SegmentationMask | null;
+  worldLandmarks?: PoseLandmark3d[];
 };

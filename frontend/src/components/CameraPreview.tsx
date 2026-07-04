@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { type FitAdjustments } from "../lib/pose/garmentFit";
+import type { PoseFrame } from "../lib/pose/types";
+import { renderHqLook } from "../lib/hqRender";
 import { useCamera } from "../hooks/useCamera";
-import { usePoseOverlay } from "../hooks/usePoseOverlay";
+import { computeOpaqueBounds, usePoseOverlay, type GarmentBounds } from "../hooks/usePoseOverlay";
 import { MirrorIcon, VideoIcon, VideoOffIcon } from "./icons";
 
 type SnapshotPayload = {
@@ -42,13 +44,63 @@ export function CameraPreview({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { error, isMirrored, startCamera, status, stopCamera, streamRef, toggleMirror } =
     useCamera();
-  const { canvasRef, detectorMessage, garmentMessage, overlayMode, segmentationMessage } = usePoseOverlay({
-    enabled: status === "live",
-    fitAdjustments,
-    garmentSrc,
-    useNaturalGarmentShape,
-    videoRef
-  });
+
+  // The latest already-smoothed PoseFrame (including its segmentationMask),
+  // captured once per rAF tick so captureLook can hand it to renderHqLook
+  // without running pose detection a second time.
+  const latestFrameRef = useRef<PoseFrame | null>(null);
+
+  const { canvasRef, detectorMessage, garmentMessage, overlayMode, segmentationMessage } =
+    usePoseOverlay({
+      enabled: status === "live",
+      fitAdjustments,
+      garmentSrc,
+      onFrame: (frame) => {
+        latestFrameRef.current = frame;
+      },
+      useNaturalGarmentShape,
+      videoRef
+    });
+
+  // Loaded independently from usePoseOverlay's own internal garment image
+  // (small, self-contained effect - not worth threading a ref through the
+  // hook's public API for two call sites) so captureLook has a real
+  // HTMLImageElement + its opaque bounds to hand to renderHqLook.
+  const garmentImageRef = useRef<HTMLImageElement | null>(null);
+  const garmentBoundsRef = useRef<GarmentBounds | null>(null);
+
+  useEffect(() => {
+    if (!garmentSrc) {
+      garmentImageRef.current = null;
+      garmentBoundsRef.current = null;
+      return;
+    }
+
+    let mounted = true;
+    const image = new Image();
+
+    image.onload = () => {
+      if (!mounted) {
+        return;
+      }
+
+      garmentImageRef.current = image;
+      garmentBoundsRef.current = computeOpaqueBounds(image);
+    };
+    image.onerror = () => {
+      if (!mounted) {
+        return;
+      }
+
+      garmentImageRef.current = null;
+      garmentBoundsRef.current = null;
+    };
+    image.src = garmentSrc;
+
+    return () => {
+      mounted = false;
+    };
+  }, [garmentSrc]);
 
   useEffect(() => {
     if (!videoRef.current) {
@@ -88,7 +140,28 @@ export function CameraPreview({
     }
 
     context.drawImage(video, 0, 0, width, height);
-    context.drawImage(overlayCanvas, 0, 0, width, height);
+
+    const frame = latestFrameRef.current;
+    const garmentImage = garmentImageRef.current;
+    const hqCanvas =
+      useNaturalGarmentShape && frame && garmentImage
+        ? renderHqLook({
+            fitAdjustments,
+            frame,
+            garmentBounds: garmentBoundsRef.current,
+            garmentImage,
+            video
+          })
+        : null;
+
+    if (hqCanvas) {
+      // The HQ composite is garment-only (no skeleton debug overlay) - a
+      // cleaner "wearing the look" capture than the live preview canvas,
+      // which also draws the landmark dots/lines.
+      context.drawImage(hqCanvas, 0, 0, width, height);
+    } else {
+      context.drawImage(overlayCanvas, 0, 0, width, height);
+    }
 
     exportCanvas.toBlob((blob) => {
       if (!blob) {
