@@ -142,23 +142,37 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const centerX = (leftShoulder.x + rightShoulder.x) / 2;
   const sleeveDrop = torsoHeight * 0.25;
   const sleeveReach = shoulderWidth * 0.28;
-  const shoulderLift = torsoHeight * 0.06;
   const neckInset = shoulderWidth * 0.18;
-  const shoulderRowHalfWidth = shoulderWidth / 2 + shoulderWidth * 0.08;
-  const hipHalfWidth = Math.abs(rightHip.x - leftHip.x) / 2;
 
-  // The waist row's width used to be a fixed fraction of shoulder width,
-  // completely ignoring how wide the person's actual hips are - which made
-  // the garment visibly pinch in right before the hem, then flare back out
-  // to the (wider) real hip line, reading as "not actually worn". Instead,
-  // interpolate the waist row's half-width between the shoulder row and the
-  // real hip half-width, following garmentMeshRowSourceFractions' own
+  // Live-tested feedback (collar sits too low, shoulders too narrow and too
+  // low, waist still too tight and sits too high) pointed at these four
+  // constants specifically - each tuned in the reported direction rather
+  // than guessed blind:
+  // - collar was only rising 2x shoulderLift (0.12*torsoHeight) above the
+  //   shoulder line; raised further on its own constant.
+  // - the shoulder row was pushed DOWN from the raw landmark, when it
+  //   needed to sit AT/above it instead - and widened further (was too
+  //   narrow even after the existing +8%/side outset).
+  // - the waist row's upward offset from the hip line (0.18*torsoHeight)
+  //   put it too far above the real hip; brought much closer to the hip
+  //   line, and the hip width it interpolates toward now includes a
+  //   drape-ease margin since even matching the real hip width read as
+  //   too tight (a T-shirt hangs with some slack, it doesn't cling).
+  const neckRise = torsoHeight * 0.16;
+  const shoulderOutset = shoulderWidth * 0.14;
+  const shoulderRise = torsoHeight * 0.03;
+  const shoulderRowHalfWidth = shoulderWidth / 2 + shoulderOutset;
+  const waistEase = 1.18;
+  const hipHalfWidth = (Math.abs(rightHip.x - leftHip.x) / 2) * waistEase;
+
+  // Interpolate the waist row's half-width between the shoulder row and the
+  // (eased) hip half-width, following garmentMeshRowSourceFractions' own
   // [shoulder=0.11, hip=1] positions, so the taper follows the body's own
-  // proportions (little to no pinch for someone whose hips are about as
-  // wide as their shoulders) instead of a fixed, body-agnostic guess.
+  // proportions instead of a fixed, body-agnostic guess.
   const waistT = (0.83 - 0.11) / (1 - 0.11);
   const waistHalfWidth = lerp(shoulderRowHalfWidth, hipHalfWidth, waistT);
-  const waistY = { left: leftHip.y - torsoHeight * 0.18, right: rightHip.y - torsoHeight * 0.18 };
+  const waistDrop = torsoHeight * 0.06;
+  const waistY = { left: leftHip.y - waistDrop, right: rightHip.y - waistDrop };
 
   // Each row keeps its own left/right landmark Y instead of collapsing to a
   // shared min/max, so real shoulder/hip tilt reaches the mesh-warp rows
@@ -170,10 +184,10 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
     // inside the person's real hip width, compounding the pinch above.
     hipLeft: { x: leftHip.x, y: leftHip.y },
     hipRight: { x: rightHip.x, y: rightHip.y },
-    leftShoulder: { x: leftShoulder.x - shoulderWidth * 0.08, y: leftShoulder.y + shoulderLift },
-    neckLeft: { x: centerX - neckInset, y: leftShoulder.y - shoulderLift },
-    neckRight: { x: centerX + neckInset, y: rightShoulder.y - shoulderLift },
-    rightShoulder: { x: rightShoulder.x + shoulderWidth * 0.08, y: rightShoulder.y + shoulderLift },
+    leftShoulder: { x: leftShoulder.x - shoulderOutset, y: leftShoulder.y - shoulderRise },
+    neckLeft: { x: centerX - neckInset, y: leftShoulder.y - neckRise },
+    neckRight: { x: centerX + neckInset, y: rightShoulder.y - neckRise },
+    rightShoulder: { x: rightShoulder.x + shoulderOutset, y: rightShoulder.y - shoulderRise },
     sleeveLeft: resolveSleevePoint(leftShoulder, leftElbow, {
       x: leftShoulder.x - sleeveReach,
       y: leftShoulder.y + sleeveDrop

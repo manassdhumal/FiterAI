@@ -410,7 +410,11 @@ export function sampleSilhouetteRowEdges(
 
   const expectedCenterX = (expectedLeftX + expectedRightX) / 2;
   const expectedHalfWidth = Math.max(1, (expectedRightX - expectedLeftX) / 2);
-  const searchHalfWidth = expectedHalfWidth * 1.8;
+  // Widened from 1.8x so the real silhouette can still be found even when
+  // the landmark-derived guess itself is off (the whole point of leaning on
+  // real segmentation data instead of fixed anatomical ratios) - still
+  // bounded, so it can't wander onto an outstretched arm or the background.
+  const searchHalfWidth = expectedHalfWidth * 2.4;
   const searchLeftX = Math.max(0, expectedCenterX - searchHalfWidth);
   const searchRightX = Math.min(canvasWidth, expectedCenterX + searchHalfWidth);
 
@@ -453,7 +457,13 @@ export function refineMeshRowsFromSegmentation(
   canvasWidth: number,
   canvasHeight: number
 ): MeshRow[] {
-  const blendFactor = 0.7;
+  // Raised from 0.7: the user asked for the garment to fit "inch perfect"
+  // to their real body rather than have its contour keep pulling back
+  // toward the fixed anatomical-ratio guess. Not a full 1.0 replace - a
+  // sliver of the landmark guess is kept to damp raw per-pixel mask noise
+  // frame-to-frame, since a hard replace would make the edge visibly jitter
+  // with the mask's own noise instead of the smoothed landmark motion.
+  const blendFactor = 0.92;
   const minValidRowWidth = 8;
 
   return rows.map((row) => {

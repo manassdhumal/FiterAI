@@ -51,8 +51,14 @@ const TASKS_VISION_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const TASKS_VISION_WASM_ROOT = `${TASKS_VISION_URL}/wasm`;
 const TASKS_VISION_BUNDLE = `${TASKS_VISION_URL}/vision_bundle.mjs`;
+// "full" trades some speed for meaningfully more accurate landmark
+// localization than "lite" (the previous model) - the direct lever for a
+// more accurate skeleton, as opposed to compensating in the fitting math
+// for an imprecise one. "heavy" (even more accurate) was skipped since it's
+// a much larger real-time performance cost for likely-marginal extra gain
+// on typical webcam hardware.
 const POSE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task";
 
 const landmarkMap: PoseLandmarkId[] = [
   "nose",
