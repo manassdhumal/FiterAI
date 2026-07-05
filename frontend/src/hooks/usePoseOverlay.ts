@@ -11,12 +11,10 @@ import {
 import { createPreferredPoseDetector } from "../lib/pose/poseDetector";
 import type { DetectorMode, PoseDetector } from "../lib/pose/poseDetector";
 import {
-  DEFAULT_LANDMARK_SMOOTHING_FACTOR,
-  DEFAULT_LANDMARK_SMOOTHING_FACTOR_Z,
+  createLandmarkHistory,
+  createLandmarkHistory3d,
   smoothLandmarks,
   smoothLandmarks3d,
-  toLandmarkHistory,
-  toLandmarkHistory3d,
   type LandmarkHistory,
   type LandmarkHistory3d
 } from "../lib/pose/smoothing";
@@ -59,6 +57,25 @@ export function buildAnchorMeshRows(canvasPoints: Point[]): MeshRow[] {
   }));
 }
 
+// garmentMeshRowIndexPairs' row 0 is the neck row and row 1 is the shoulder
+// row, so gap index 0 (between them) is the collar-to-shoulder transition.
+const COLLAR_GAP_INDEX = 0;
+
+// How far the collar gap's intermediate rows bow inward (toward the
+// garment's own centerline) at the midpoint of the gap, as a fraction of
+// that row's own left-to-right width. A real collar curves in toward the
+// neck instead of tapering as a straight diagonal to the shoulder point -
+// lerping left/right independently (even with a re-timed t) can't produce
+// that, since any point lerped between two fixed anchors still lands
+// exactly on the straight line between them. Bowing perpendicular to that
+// line is what actually curves it.
+const COLLAR_BOW_FRACTION = 0.14;
+
+function collarBowFactor(t: number): number {
+  // 0 at both anchors, peaking at the gap's midpoint.
+  return Math.sin(Math.PI * t);
+}
+
 export function densifyMeshRows(anchorRows: MeshRow[], subdivisionsPerGap: number): MeshRow[] {
   const dense: MeshRow[] = [];
 
@@ -70,11 +87,23 @@ export function densifyMeshRows(anchorRows: MeshRow[], subdivisionsPerGap: numbe
       return;
     }
 
+    const isCollarGap = index === COLLAR_GAP_INDEX;
+
     for (let step = 1; step <= subdivisionsPerGap; step += 1) {
       const t = step / (subdivisionsPerGap + 1);
+      const left = lerpPoint(row.left, next.left, t);
+      const right = lerpPoint(row.right, next.right, t);
+
+      if (isCollarGap) {
+        const gapWidth = Math.abs(right.x - left.x);
+        const bow = gapWidth * COLLAR_BOW_FRACTION * collarBowFactor(t);
+        left.x += bow;
+        right.x -= bow;
+      }
+
       dense.push({
-        left: lerpPoint(row.left, next.left, t),
-        right: lerpPoint(row.right, next.right, t),
+        left,
+        right,
         sourceFraction: row.sourceFraction + (next.sourceFraction - row.sourceFraction) * t
       });
     }
@@ -893,25 +922,31 @@ export function usePoseOverlay({
 
       if (rawPoseFrame) {
         // Mock-mode motion is already a smooth deterministic function of
-        // time, so only damp jitter for real (noisy) live-camera detection.
-        const smoothingFactor = detector.kind === "mock" ? 1 : DEFAULT_LANDMARK_SMOOTHING_FACTOR;
-        const smoothedLandmarks = smoothLandmarks(
-          rawPoseFrame.landmarks,
-          landmarkHistoryRef.current,
-          smoothingFactor
-        );
-        landmarkHistoryRef.current = toLandmarkHistory(smoothedLandmarks);
+        // time, so only filter real (noisy) live-camera detection.
+        let smoothedLandmarks: PoseLandmark[];
+        if (detector.kind === "mock") {
+          smoothedLandmarks = rawPoseFrame.landmarks;
+        } else {
+          if (!landmarkHistoryRef.current) {
+            landmarkHistoryRef.current = createLandmarkHistory();
+          }
+          smoothedLandmarks = smoothLandmarks(rawPoseFrame.landmarks, landmarkHistoryRef.current, timestamp);
+        }
 
         let smoothedWorldLandmarks: PoseLandmark3d[] | undefined;
         if (rawPoseFrame.worldLandmarks) {
-          const smoothingFactorZ = detector.kind === "mock" ? 1 : DEFAULT_LANDMARK_SMOOTHING_FACTOR_Z;
-          smoothedWorldLandmarks = smoothLandmarks3d(
-            rawPoseFrame.worldLandmarks,
-            worldLandmarkHistoryRef.current,
-            smoothingFactor,
-            smoothingFactorZ
-          );
-          worldLandmarkHistoryRef.current = toLandmarkHistory3d(smoothedWorldLandmarks);
+          if (detector.kind === "mock") {
+            smoothedWorldLandmarks = rawPoseFrame.worldLandmarks;
+          } else {
+            if (!worldLandmarkHistoryRef.current) {
+              worldLandmarkHistoryRef.current = createLandmarkHistory3d();
+            }
+            smoothedWorldLandmarks = smoothLandmarks3d(
+              rawPoseFrame.worldLandmarks,
+              worldLandmarkHistoryRef.current,
+              timestamp
+            );
+          }
         } else {
           worldLandmarkHistoryRef.current = null;
         }
