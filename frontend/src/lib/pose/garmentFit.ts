@@ -34,7 +34,8 @@ export type TorsoFitRegion = {
   rightShoulder: Point;
   sleeveLeft: Point;
   sleeveRight: Point;
-  waistInset: number;
+  waistLeft: Point;
+  waistRight: Point;
   width: number;
 };
 
@@ -83,6 +84,10 @@ function resolveSleevePoint(shoulder: Point, elbow: PoseLandmark | null, fallbac
   }
 
   return fallback;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }
 
 function rotatePoint(point: Point, center: Point, radians: number): Point {
@@ -139,7 +144,21 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const sleeveReach = shoulderWidth * 0.28;
   const shoulderLift = torsoHeight * 0.06;
   const neckInset = shoulderWidth * 0.18;
-  const hipInset = shoulderWidth * 0.08;
+  const shoulderRowHalfWidth = shoulderWidth / 2 + shoulderWidth * 0.08;
+  const hipHalfWidth = Math.abs(rightHip.x - leftHip.x) / 2;
+
+  // The waist row's width used to be a fixed fraction of shoulder width,
+  // completely ignoring how wide the person's actual hips are - which made
+  // the garment visibly pinch in right before the hem, then flare back out
+  // to the (wider) real hip line, reading as "not actually worn". Instead,
+  // interpolate the waist row's half-width between the shoulder row and the
+  // real hip half-width, following garmentMeshRowSourceFractions' own
+  // [shoulder=0.11, hip=1] positions, so the taper follows the body's own
+  // proportions (little to no pinch for someone whose hips are about as
+  // wide as their shoulders) instead of a fixed, body-agnostic guess.
+  const waistT = (0.83 - 0.11) / (1 - 0.11);
+  const waistHalfWidth = lerp(shoulderRowHalfWidth, hipHalfWidth, waistT);
+  const waistY = { left: leftHip.y - torsoHeight * 0.18, right: rightHip.y - torsoHeight * 0.18 };
 
   // Each row keeps its own left/right landmark Y instead of collapsing to a
   // shared min/max, so real shoulder/hip tilt reaches the mesh-warp rows
@@ -147,8 +166,10 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   return {
     centerX,
     height: torsoHeight,
-    hipLeft: { x: leftHip.x + hipInset, y: leftHip.y },
-    hipRight: { x: rightHip.x - hipInset, y: rightHip.y },
+    // No inward inset on the hip line - it previously narrowed the hem
+    // inside the person's real hip width, compounding the pinch above.
+    hipLeft: { x: leftHip.x, y: leftHip.y },
+    hipRight: { x: rightHip.x, y: rightHip.y },
     leftShoulder: { x: leftShoulder.x - shoulderWidth * 0.08, y: leftShoulder.y + shoulderLift },
     neckLeft: { x: centerX - neckInset, y: leftShoulder.y - shoulderLift },
     neckRight: { x: centerX + neckInset, y: rightShoulder.y - shoulderLift },
@@ -161,7 +182,8 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
       x: rightShoulder.x + sleeveReach,
       y: rightShoulder.y + sleeveDrop
     }),
-    waistInset: shoulderWidth * 0.12,
+    waistLeft: { x: centerX - waistHalfWidth, y: waistY.left },
+    waistRight: { x: centerX + waistHalfWidth, y: waistY.right },
     width: shoulderWidth
   };
 }
@@ -171,16 +193,10 @@ export function buildGarmentGuidePoints(region: TorsoFitRegion): Point[] {
     region.neckLeft,
     region.leftShoulder,
     region.sleeveLeft,
-    {
-      x: region.centerX - region.waistInset - region.width * 0.24,
-      y: region.hipLeft.y - region.height * 0.18
-    },
+    region.waistLeft,
     region.hipLeft,
     region.hipRight,
-    {
-      x: region.centerX + region.waistInset + region.width * 0.24,
-      y: region.hipRight.y - region.height * 0.18
-    },
+    region.waistRight,
     region.sleeveRight,
     region.rightShoulder,
     region.neckRight
