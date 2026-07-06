@@ -132,12 +132,27 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const leftElbow = facesScreenNormally ? leftElbowRaw : rightElbowRaw;
   const rightElbow = facesScreenNormally ? rightElbowRaw : leftElbowRaw;
 
-  const shoulderWidth = rightShoulder.x - leftShoulder.x;
+  const rawShoulderWidth = rightShoulder.x - leftShoulder.x;
   const torsoHeight = Math.max(leftHip.y, rightHip.y) - Math.min(leftShoulder.y, rightShoulder.y);
 
-  if (shoulderWidth <= 0 || torsoHeight <= 0) {
+  if (rawShoulderWidth <= 0 || torsoHeight <= 0) {
     return null;
   }
+
+  // Turning toward profile relative to the camera foreshortens the 2D
+  // shoulder-to-shoulder (and hip-to-hip) projection toward zero even though
+  // the person hasn't actually gotten narrower - torsoHeight barely changes
+  // under yaw rotation, only width does. A flat front-view garment image
+  // warped by a mesh keyed directly to that width has no real depth to fall
+  // back on, so an unclamped width collapses the whole garment to a
+  // near-invisible sliver mid-turn instead of just narrowing it. Floor both
+  // widths to the same minimum, derived from typical shoulder-width/torso-
+  // height body proportions, so a turn still visibly narrows the garment but
+  // can't erase it - and floors shoulder/hip together so the taper between
+  // them stays consistent instead of one collapsing while the other doesn't.
+  const MIN_WIDTH_TO_HEIGHT_RATIO = 0.35;
+  const minHalfWidth = (torsoHeight * MIN_WIDTH_TO_HEIGHT_RATIO) / 2;
+  const shoulderWidth = Math.max(rawShoulderWidth, minHalfWidth * 2);
 
   const centerX = (leftShoulder.x + rightShoulder.x) / 2;
   const sleeveDrop = torsoHeight * 0.25;
@@ -163,7 +178,7 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const shoulderRise = torsoHeight * 0.03;
   const shoulderRowHalfWidth = shoulderWidth / 2 + shoulderOutset;
   const waistEase = 1.18;
-  const hipHalfWidth = (Math.abs(rightHip.x - leftHip.x) / 2) * waistEase;
+  const hipHalfWidth = Math.max((Math.abs(rightHip.x - leftHip.x) / 2) * waistEase, minHalfWidth);
 
   // Interpolate the waist row's half-width between the shoulder row and the
   // (eased) hip half-width, following garmentMeshRowSourceFractions' own
@@ -174,6 +189,14 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const waistDrop = torsoHeight * 0.06;
   const waistY = { left: leftHip.y - waistDrop, right: rightHip.y - waistDrop };
 
+  // Same width-floor reasoning as shoulderWidth above, applied to the raw hip
+  // line: only pushes each side outward from its own real position (leaving
+  // normal, non-degenerate hip width untouched, preserving the earlier
+  // hourglass-pinch fix below) when the raw span has collapsed under a
+  // profile turn.
+  const rawHipHalfWidth = Math.abs(rightHip.x - leftHip.x) / 2;
+  const hipOutset = Math.max(0, minHalfWidth - rawHipHalfWidth);
+
   // Each row keeps its own left/right landmark Y instead of collapsing to a
   // shared min/max, so real shoulder/hip tilt reaches the mesh-warp rows
   // (buildGarmentGuidePoints) instead of being flattened out.
@@ -182,8 +205,8 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
     height: torsoHeight,
     // No inward inset on the hip line - it previously narrowed the hem
     // inside the person's real hip width, compounding the pinch above.
-    hipLeft: { x: leftHip.x, y: leftHip.y },
-    hipRight: { x: rightHip.x, y: rightHip.y },
+    hipLeft: { x: leftHip.x - hipOutset, y: leftHip.y },
+    hipRight: { x: rightHip.x + hipOutset, y: rightHip.y },
     leftShoulder: { x: leftShoulder.x - shoulderOutset, y: leftShoulder.y - shoulderRise },
     neckLeft: { x: centerX - neckInset, y: leftShoulder.y - neckRise },
     neckRight: { x: centerX + neckInset, y: rightShoulder.y - neckRise },
