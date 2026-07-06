@@ -382,6 +382,29 @@ function paintWarpedTriangle(
 // diagonal, without changing the mesh's row data or its curvature at all.
 const MESH_COLUMN_SUBDIVISIONS = 4;
 
+// Column subdivision alone still stretches the source fabric uniformly
+// left-to-right, which is why the garment reads as a flat plane pasted onto
+// the body rather than fabric wrapped around a rounded torso. A real torso
+// approximates a cylinder facing the camera: front-and-center, the surface
+// is nearly perpendicular to the view, so a strip of fabric maps to close
+// to its own width on screen; near the left/right edges the surface curves
+// away from the camera (grazing angle), so the same strip width of fabric
+// foreshortens into much less screen space before disappearing around the
+// silhouette. A half-cylinder's projection is exactly a sine curve, so
+// easing the destination column boundaries through `sin` (while keeping
+// source sampling linear/uniform) reproduces that: interior columns near
+// the center spread out a bit, columns near the left/right edges compress -
+// giving the garment a wrapped, rounded look instead of a flat stretch.
+// Blended partway toward the pure sine (rather than the full curve) since a
+// real torso isn't a perfect cylinder and full-strength curvature risks its
+// own artifact (near-zero destination width right at the silhouette edge).
+const CYLINDER_WRAP_STRENGTH = 0.6;
+
+function cylinderWrapEase(t: number): number {
+  const sine = 0.5 + 0.5 * Math.sin((t - 0.5) * Math.PI);
+  return t + CYLINDER_WRAP_STRENGTH * (sine - t);
+}
+
 export function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
@@ -417,12 +440,16 @@ export function paintMeshWarpedGarment(
     for (let col = 0; col < MESH_COLUMN_SUBDIVISIONS; col += 1) {
       const t0 = col / MESH_COLUMN_SUBDIVISIONS;
       const t1 = (col + 1) / MESH_COLUMN_SUBDIVISIONS;
+      const destT0 = cylinderWrapEase(t0);
+      const destT1 = cylinderWrapEase(t1);
 
-      const destTopLeft = lerpPoint(top.left, top.right, t0);
-      const destTopRight = lerpPoint(top.left, top.right, t1);
-      const destBottomLeft = lerpPoint(bottom.left, bottom.right, t0);
-      const destBottomRight = lerpPoint(bottom.left, bottom.right, t1);
+      const destTopLeft = lerpPoint(top.left, top.right, destT0);
+      const destTopRight = lerpPoint(top.left, top.right, destT1);
+      const destBottomLeft = lerpPoint(bottom.left, bottom.right, destT0);
+      const destBottomRight = lerpPoint(bottom.left, bottom.right, destT1);
 
+      // Source sampling stays linear/uniform - only where each sample lands
+      // on screen (above) carries the wrap curvature.
       const sourceLeftX = contentLeft + (contentRight - contentLeft) * t0;
       const sourceRightX = contentLeft + (contentRight - contentLeft) * t1;
 
