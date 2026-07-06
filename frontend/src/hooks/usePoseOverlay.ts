@@ -366,6 +366,22 @@ function paintWarpedTriangle(
   context.restore();
 }
 
+// Each row-band is a quad split into 2 triangles by a single fixed diagonal
+// (top-right to bottom-left). That diagonal is mathematically continuous
+// (both triangles share it exactly), but any non-affine content in the
+// source image within that quad - fabric shading/highlights/folds baked
+// into a real product photo, which is the norm, not the exception - can
+// only be approximated as two flat affine halves either side of it. The
+// two halves' approximation errors diverge most right at the diagonal,
+// so real garment images show a visible crease exactly there - worse the
+// more skewed the quad gets, which is precisely what happens as the mesh
+// reshapes during body movement (matches the reported "distortion during
+// movement"). Subdividing each row-band into narrower column strips first
+// shrinks each triangle pair's share of the source content, shrinking the
+// two-halves approximation error (and thus the visible crease) at each
+// diagonal, without changing the mesh's row data or its curvature at all.
+const MESH_COLUMN_SUBDIVISIONS = 4;
+
 export function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
@@ -398,23 +414,36 @@ export function paintMeshWarpedGarment(
     const sourceTopY = contentTop + top.sourceFraction * contentHeight;
     const sourceBottomY = contentTop + bottom.sourceFraction * contentHeight;
 
-    const sourceTopLeft = { x: contentLeft, y: sourceTopY };
-    const sourceTopRight = { x: contentRight, y: sourceTopY };
-    const sourceBottomLeft = { x: contentLeft, y: sourceBottomY };
-    const sourceBottomRight = { x: contentRight, y: sourceBottomY };
+    for (let col = 0; col < MESH_COLUMN_SUBDIVISIONS; col += 1) {
+      const t0 = col / MESH_COLUMN_SUBDIVISIONS;
+      const t1 = (col + 1) / MESH_COLUMN_SUBDIVISIONS;
 
-    paintWarpedTriangle(
-      context,
-      garmentImage,
-      [sourceTopLeft, sourceTopRight, sourceBottomLeft],
-      [top.left, top.right, bottom.left]
-    );
-    paintWarpedTriangle(
-      context,
-      garmentImage,
-      [sourceTopRight, sourceBottomRight, sourceBottomLeft],
-      [top.right, bottom.right, bottom.left]
-    );
+      const destTopLeft = lerpPoint(top.left, top.right, t0);
+      const destTopRight = lerpPoint(top.left, top.right, t1);
+      const destBottomLeft = lerpPoint(bottom.left, bottom.right, t0);
+      const destBottomRight = lerpPoint(bottom.left, bottom.right, t1);
+
+      const sourceLeftX = contentLeft + (contentRight - contentLeft) * t0;
+      const sourceRightX = contentLeft + (contentRight - contentLeft) * t1;
+
+      const sourceTopLeft = { x: sourceLeftX, y: sourceTopY };
+      const sourceTopRight = { x: sourceRightX, y: sourceTopY };
+      const sourceBottomLeft = { x: sourceLeftX, y: sourceBottomY };
+      const sourceBottomRight = { x: sourceRightX, y: sourceBottomY };
+
+      paintWarpedTriangle(
+        context,
+        garmentImage,
+        [sourceTopLeft, sourceTopRight, sourceBottomLeft],
+        [destTopLeft, destTopRight, destBottomLeft]
+      );
+      paintWarpedTriangle(
+        context,
+        garmentImage,
+        [sourceTopRight, sourceBottomRight, sourceBottomLeft],
+        [destTopRight, destBottomRight, destBottomLeft]
+      );
+    }
   }
 
   context.restore();
