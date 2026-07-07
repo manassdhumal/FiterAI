@@ -410,7 +410,13 @@ export function paintMeshWarpedGarment(
   garmentImage: HTMLImageElement,
   rows: MeshRow[],
   garmentBounds: GarmentBounds | null,
-  alpha: number
+  alpha: number,
+  // Overridable so a one-shot, no-frame-budget caller (the HQ capture path)
+  // can afford a finer grid than the live 30-60fps preview - measured at
+  // ~2ms/call for the live path's own default, with large headroom left in
+  // the frame budget even on top of MediaPipe's own per-frame inference
+  // cost, so a denser HQ-only grid doesn't risk live performance at all.
+  columnSubdivisions: number = MESH_COLUMN_SUBDIVISIONS
 ) {
   const imageWidth = garmentImage.naturalWidth;
   const imageHeight = garmentImage.naturalHeight;
@@ -437,9 +443,9 @@ export function paintMeshWarpedGarment(
     const sourceTopY = contentTop + top.sourceFraction * contentHeight;
     const sourceBottomY = contentTop + bottom.sourceFraction * contentHeight;
 
-    for (let col = 0; col < MESH_COLUMN_SUBDIVISIONS; col += 1) {
-      const t0 = col / MESH_COLUMN_SUBDIVISIONS;
-      const t1 = (col + 1) / MESH_COLUMN_SUBDIVISIONS;
+    for (let col = 0; col < columnSubdivisions; col += 1) {
+      const t0 = col / columnSubdivisions;
+      const t1 = (col + 1) / columnSubdivisions;
       const destT0 = cylinderWrapEase(t0);
       const destT1 = cylinderWrapEase(t1);
 

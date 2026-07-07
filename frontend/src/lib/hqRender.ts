@@ -18,6 +18,13 @@ import {
 // denser mesh for smoother body-contour tracing.
 const HQ_DENSE_ROW_SUBDIVISIONS_PER_GAP = 5;
 
+// Same reasoning as the row density above: the live preview's column count
+// is a real-time budget compromise (measured ~2ms/call at that density,
+// leaving headroom but still a per-frame cost), while a captured still pays
+// that cost exactly once, synchronously - so it can afford a visibly finer
+// grid for smoother shading/less banding.
+const HQ_MESH_COLUMN_SUBDIVISIONS = 8;
+
 export type HqRenderInput = {
   fitAdjustments: FitAdjustments;
   frame: PoseFrame;
@@ -83,7 +90,7 @@ export function renderHqLook(input: HqRenderInput): HTMLCanvasElement | null {
       const meshRows = refineMeshRowsFromSegmentation(denseRows, segmentationMask, width, height);
       const meshOutline = [...meshRows.map((row) => row.left), ...meshRows.slice().reverse().map((row) => row.right)];
 
-      paintMeshWarpedGarment(bufferContext, garmentImage, meshRows, garmentBounds, 1);
+      paintMeshWarpedGarment(bufferContext, garmentImage, meshRows, garmentBounds, 1, HQ_MESH_COLUMN_SUBDIVISIONS);
 
       const lightingCanvas = document.createElement("canvas");
       updateLightingBuffer(video, lightingCanvas);
@@ -115,6 +122,13 @@ export function renderHqLook(input: HqRenderInput): HTMLCanvasElement | null {
     }
   }
 
-  paintMeshWarpedGarment(context, garmentImage, buildAnchorMeshRows(canvasPoints), garmentBounds, 0.92);
+  paintMeshWarpedGarment(
+    context,
+    garmentImage,
+    buildAnchorMeshRows(canvasPoints),
+    garmentBounds,
+    0.92,
+    HQ_MESH_COLUMN_SUBDIVISIONS
+  );
   return canvas;
 }
