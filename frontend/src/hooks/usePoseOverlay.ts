@@ -405,6 +405,21 @@ function cylinderWrapEase(t: number): number {
   return t + CYLINDER_WRAP_STRENGTH * (sine - t);
 }
 
+// The wrap curvature above bends the garment's *shape* toward a cylinder,
+// but shape alone still looks flat-shaded - a genuinely rounded surface also
+// darkens as it turns away from the camera/light (a cylinder's brightness
+// falls off roughly like the cosine of the angle from center, thinnest right
+// at center, most falloff at the silhouette edge). Multiplying a subtle,
+// edge-weighted darkening on top of each column - independent of whatever
+// lighting/segmentation pass already ran - makes the geometric curve read as
+// an actually-rounded surface instead of a bent flat plane.
+const EDGE_SHADE_STRENGTH = 0.18;
+
+function edgeShadeAlpha(columnMidT: number): number {
+  const edgeness = Math.abs(columnMidT - 0.5) * 2;
+  return EDGE_SHADE_STRENGTH * edgeness * edgeness;
+}
+
 export function paintMeshWarpedGarment(
   context: CanvasRenderingContext2D,
   garmentImage: HTMLImageElement,
@@ -476,6 +491,22 @@ export function paintMeshWarpedGarment(
         [sourceTopRight, sourceBottomRight, sourceBottomLeft],
         [destTopRight, destBottomRight, destBottomLeft]
       );
+
+      const shadeAlpha = edgeShadeAlpha((t0 + t1) / 2);
+      if (shadeAlpha > 0.001) {
+        context.save();
+        context.globalCompositeOperation = "multiply";
+        context.globalAlpha = shadeAlpha;
+        context.fillStyle = "#000000";
+        context.beginPath();
+        context.moveTo(destTopLeft.x, destTopLeft.y);
+        context.lineTo(destTopRight.x, destTopRight.y);
+        context.lineTo(destBottomRight.x, destBottomRight.y);
+        context.lineTo(destBottomLeft.x, destBottomLeft.y);
+        context.closePath();
+        context.fill();
+        context.restore();
+      }
     }
   }
 
