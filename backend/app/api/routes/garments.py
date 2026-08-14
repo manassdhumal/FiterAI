@@ -37,4 +37,5 @@ async def intake_garment(file: UploadFile = File(...)) -> GarmentIntakeResponse:
         was_worn_photo=result.was_worn_photo,
         original_url=result.original_url,
         clean_url=result.clean_url,
+        category=result.category,
     )

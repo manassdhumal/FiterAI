@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.services.garment_intake.background_removal import extract_garment_from_worn_photo, remove_background
 from app.services.garment_intake.mask_utils import clean_alpha_edge, mask_coverage_ratio, normalize_onto_canvas
 from app.services.garment_intake.person_detection import contains_person_face
+from app.services.tagging.classifier import classify_garment
 
 
 class InvalidGarmentImageError(ValueError):
@@ -25,6 +26,7 @@ class GarmentIntakeResult:
     was_worn_photo: bool
     original_url: str
     clean_url: str
+    category: str
 
 
 def _load_image(raw_bytes: bytes) -> Image.Image:
@@ -70,6 +72,8 @@ def process_garment_upload(raw_bytes: bytes, original_filename: str) -> GarmentI
     )
     clean_image.save(garment_dir / "clean.png")
 
+    category = classify_garment(clean_image)
+
     return GarmentIntakeResult(
         garment_id=garment_id,
         original_filename=original_filename,
@@ -80,4 +84,5 @@ def process_garment_upload(raw_bytes: bytes, original_filename: str) -> GarmentI
         was_worn_photo=was_worn_photo,
         original_url=f"{settings.data_url_prefix}/garments/{garment_id}/original.png",
         clean_url=f"{settings.data_url_prefix}/garments/{garment_id}/clean.png",
+        category=category,
     )

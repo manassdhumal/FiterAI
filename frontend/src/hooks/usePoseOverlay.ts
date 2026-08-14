@@ -36,6 +36,12 @@ export type MeshRow = {
   left: Point;
   right: Point;
   sourceFraction: number;
+  // Set only by refineMeshRowsFromSegmentation: ratio of the real detected
+  // silhouette width to the landmark-derived guess width at this row,
+  // clamped to [0,1]. Undefined on rows with no segmentation data (the
+  // plain landmark-only fallback path) - treated as 1 (no extra curvature
+  // boost) wherever it's read, so that path's behavior is unchanged.
+  edgeWidthRatio?: number;
 };
 
 // Number of interpolated rows inserted between each pair of adjacent anchor
@@ -400,11 +406,6 @@ const MESH_COLUMN_SUBDIVISIONS = 4;
 // own artifact (near-zero destination width right at the silhouette edge).
 const CYLINDER_WRAP_STRENGTH = 0.6;
 
-function cylinderWrapEase(t: number): number {
-  const sine = 0.5 + 0.5 * Math.sin((t - 0.5) * Math.PI);
-  return t + CYLINDER_WRAP_STRENGTH * (sine - t);
-}
-
 // The wrap curvature above bends the garment's *shape* toward a cylinder,
 // but shape alone still looks flat-shaded - a genuinely rounded surface also
 // darkens as it turns away from the camera/light (a cylinder's brightness
@@ -415,9 +416,36 @@ function cylinderWrapEase(t: number): number {
 // an actually-rounded surface instead of a bent flat plane.
 const EDGE_SHADE_STRENGTH = 0.18;
 
-function edgeShadeAlpha(columnMidT: number): number {
+// Both effects above use one fixed strength regardless of how the body is
+// actually oriented this frame - reasonable on average, but a person facing
+// the camera head-on doesn't need as much "fake roundness" help as one
+// who's turned toward profile (where the real foreshortening is much more
+// pronounced). refineMeshRowsFromSegmentation already measures a real,
+// per-row signal for this - edgeWidthRatio, how much narrower the actual
+// detected silhouette is than the landmark-derived guess - so scale both
+// effects up specifically on rows where that ratio shows real compression,
+// instead of guessing a single strength that has to compromise across every
+// orientation. A ratio of 1 (or no segmentation data at all) reproduces
+// today's fixed strengths exactly - this only ever adds intensity, and only
+// where the data itself indicates it's warranted.
+const MIN_EDGE_WIDTH_RATIO_FOR_MAX_BOOST = 0.6;
+const MAX_CYLINDER_WRAP_STRENGTH = 0.85;
+const MAX_EDGE_SHADE_STRENGTH = 0.3;
+
+function curvatureBoost(rowEdgeWidthRatio: number): number {
+  const compression = 1 - rowEdgeWidthRatio;
+  const maxCompression = 1 - MIN_EDGE_WIDTH_RATIO_FOR_MAX_BOOST;
+  return Math.min(1, Math.max(0, compression / maxCompression));
+}
+
+function cylinderWrapEase(t: number, wrapStrength: number): number {
+  const sine = 0.5 + 0.5 * Math.sin((t - 0.5) * Math.PI);
+  return t + wrapStrength * (sine - t);
+}
+
+function edgeShadeAlpha(columnMidT: number, shadeStrength: number): number {
   const edgeness = Math.abs(columnMidT - 0.5) * 2;
-  return EDGE_SHADE_STRENGTH * edgeness * edgeness;
+  return shadeStrength * edgeness * edgeness;
 }
 
 export function paintMeshWarpedGarment(
@@ -458,11 +486,19 @@ export function paintMeshWarpedGarment(
     const sourceTopY = contentTop + top.sourceFraction * contentHeight;
     const sourceBottomY = contentTop + bottom.sourceFraction * contentHeight;
 
+    // The more-compressed of this band's two edges - if either one shows
+    // real segmentation-detected foreshortening, boost curvature/shading for
+    // the whole band rather than averaging it away.
+    const rowEdgeWidthRatio = Math.min(top.edgeWidthRatio ?? 1, bottom.edgeWidthRatio ?? 1);
+    const boost = curvatureBoost(rowEdgeWidthRatio);
+    const wrapStrength = CYLINDER_WRAP_STRENGTH + boost * (MAX_CYLINDER_WRAP_STRENGTH - CYLINDER_WRAP_STRENGTH);
+    const shadeStrength = EDGE_SHADE_STRENGTH + boost * (MAX_EDGE_SHADE_STRENGTH - EDGE_SHADE_STRENGTH);
+
     for (let col = 0; col < columnSubdivisions; col += 1) {
       const t0 = col / columnSubdivisions;
       const t1 = (col + 1) / columnSubdivisions;
-      const destT0 = cylinderWrapEase(t0);
-      const destT1 = cylinderWrapEase(t1);
+      const destT0 = cylinderWrapEase(t0, wrapStrength);
+      const destT1 = cylinderWrapEase(t1, wrapStrength);
 
       const destTopLeft = lerpPoint(top.left, top.right, destT0);
       const destTopRight = lerpPoint(top.left, top.right, destT1);
@@ -492,7 +528,7 @@ export function paintMeshWarpedGarment(
         [destTopRight, destBottomRight, destBottomLeft]
       );
 
-      const shadeAlpha = edgeShadeAlpha((t0 + t1) / 2);
+      const shadeAlpha = edgeShadeAlpha((t0 + t1) / 2, shadeStrength);
       if (shadeAlpha > 0.001) {
         context.save();
         context.globalCompositeOperation = "multiply";
@@ -604,10 +640,21 @@ export function refineMeshRowsFromSegmentation(
       return row;
     }
 
+    // How much narrower the real detected silhouette is than the
+    // landmark-derived guess at this row - a measured, per-frame signal that
+    // the body has turned toward profile (real foreshortening), not just a
+    // constant assumption. Read by paintMeshWarpedGarment to scale up the
+    // wrap curvature/edge-shading specifically where the body is actually
+    // turning, instead of applying the same fixed strength everywhere.
+    const landmarkWidth = row.right.x - row.left.x;
+    const refinedWidth = edges.right - edges.left;
+    const edgeWidthRatio = landmarkWidth > 0 ? Math.min(1, refinedWidth / landmarkWidth) : 1;
+
     return {
       ...row,
       left: { ...row.left, x: row.left.x + (edges.left - row.left.x) * blendFactor },
-      right: { ...row.right, x: row.right.x + (edges.right - row.right.x) * blendFactor }
+      right: { ...row.right, x: row.right.x + (edges.right - row.right.x) * blendFactor },
+      edgeWidthRatio
     };
   });
 }

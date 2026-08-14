@@ -13,3 +13,4 @@ class GarmentIntakeResponse(BaseModel):
     was_worn_photo: bool
     original_url: str
     clean_url: str
+    category: str

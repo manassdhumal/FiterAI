@@ -1,4 +1,4 @@
-﻿fastapi==0.111.1
+fastapi==0.111.1
 uvicorn[standard]==0.30.3
 pydantic==2.8.2
 python-multipart==0.0.9
@@ -7,3 +7,6 @@ numpy>=2.2,<3
 rembg==2.0.76
 onnxruntime>=1.19
 opencv-python-headless==4.13.0.92
+transformers>=4.40.0
+torch>=2.0.0
+mediapipe>=0.10.9
