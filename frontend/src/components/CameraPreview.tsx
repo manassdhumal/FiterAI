@@ -3,20 +3,25 @@ import { useEffect, useMemo, useRef } from "react";
 import { type FitAdjustments } from "../lib/pose/garmentFit";
 import type { PoseFrame } from "../lib/pose/types";
 import { renderHqLook } from "../lib/hqRender";
+import { createRealisticRender } from "../lib/api/renders";
 import { useCamera } from "../hooks/useCamera";
 import { computeOpaqueBounds, usePoseOverlay, type GarmentBounds } from "../hooks/usePoseOverlay";
 import { MirrorIcon, VideoIcon, VideoOffIcon } from "./icons";
 
 type SnapshotPayload = {
+  blob?: Blob;
   createdAt: string;
   src: string;
 };
 
 type CameraPreviewProps = {
   fitAdjustments: FitAdjustments;
+  garmentId?: string;
   garmentName: string | null;
   garmentSrc: string | null;
   onCapture: (snapshot: SnapshotPayload) => void;
+  onHqRender?: (snapshot: SnapshotPayload) => void;
+  isRendering?: boolean;
   useNaturalGarmentShape: boolean;
 };
 
@@ -36,9 +41,12 @@ const statusPillVariant = {
 
 export function CameraPreview({
   fitAdjustments,
+  garmentId,
   garmentName,
   garmentSrc,
+  isRendering,
   onCapture,
+  onHqRender,
   useNaturalGarmentShape
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -169,11 +177,59 @@ export function CameraPreview({
       }
 
       onCapture({
+        blob,
         createdAt: new Date().toLocaleString(),
         src: URL.createObjectURL(blob)
       });
     }, "image/png");
   };
+
+  const captureHqRender = () => {
+    const video = videoRef.current;
+    
+    // We only need the raw video frame (the person) for the backend to render.
+    if (!video) {
+      return;
+    }
+
+    const width = video.videoWidth || video.clientWidth;
+    const height = video.videoHeight || video.clientHeight;
+
+    if (!width || !height) {
+      return;
+    }
+
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = width;
+    exportCanvas.height = height;
+    const context = exportCanvas.getContext("2d");
+
+    if (!context) {
+      return;
+    }
+
+    if (isMirrored) {
+      context.translate(width, 0);
+      context.scale(-1, 1);
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+
+    exportCanvas.toBlob((blob) => {
+      if (!blob) {
+        return;
+      }
+
+      if (onHqRender) {
+        onHqRender({
+          blob,
+          createdAt: new Date().toLocaleString(),
+          src: URL.createObjectURL(blob)
+        });
+      }
+    }, "image/png");
+  };
+
 
   const captureFileName = useMemo(() => {
     const base = garmentName ? garmentName.replace(/\.[^.]+$/, "") : "fitcheck-look";
@@ -250,18 +306,25 @@ export function CameraPreview({
           </button>
         </div>
 
-        <button type="button" className="button--capture" onClick={captureLook} disabled={status !== "live"}>
-          <span
-            style={{
-              border: "2.5px solid currentColor",
-              borderRadius: "999px",
-              display: "inline-block",
-              height: "15px",
-              width: "15px"
-            }}
-          />
-          Capture look
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" className="button--capture" onClick={captureLook} disabled={status !== "live" || isRendering}>
+            <span
+              style={{
+                border: "2.5px solid currentColor",
+                borderRadius: "999px",
+                display: "inline-block",
+                height: "15px",
+                width: "15px"
+              }}
+            />
+            Capture look
+          </button>
+          {garmentId && onHqRender && (
+            <button type="button" className="button--capture" onClick={captureHqRender} disabled={status !== "live" || isRendering} style={{ backgroundColor: "var(--color-accent)", borderColor: "var(--color-accent)", color: "#fff" }}>
+              {isRendering ? "Rendering..." : "HQ Render"}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="camera-card__footer">

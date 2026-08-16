@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import { CameraPreview } from "../components/CameraPreview";
 import { DownloadIcon, GalleryIcon, MoonIcon, SunIcon, TrashIcon, UploadIcon } from "../components/icons";
 import { uploadGarment } from "../lib/api/garments";
+import { createRealisticRender } from "../lib/api/renders";
 import {
   defaultFitAdjustments,
   type FitAdjustments
@@ -23,6 +24,7 @@ const stepLabels = ["Upload", "Try On", "Fine-tune", "Your Looks"];
 type GarmentProcessingStatus = "error" | "processing" | "ready";
 
 type GarmentAsset = {
+  garmentId?: string;
   name: string;
   src: string;
   status: GarmentProcessingStatus;
@@ -32,6 +34,7 @@ type GarmentAsset = {
 type SavedLook = {
   createdAt: string;
   id: string;
+  isHqRender?: boolean;
   src: string;
 };
 
@@ -79,6 +82,7 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
   const [garmentAsset, setGarmentAsset] = useState<GarmentAsset | null>(null);
   const [fitAdjustments, setFitAdjustments] = useState<FitAdjustments>(defaultFitAdjustments);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
+  const [isRendering, setIsRendering] = useState(false);
   const [step, setStep] = useState(1);
   const [maxUnlockedStep, setMaxUnlockedStep] = useState(1);
   const uploadRequestIdRef = useRef(0);
@@ -136,6 +140,7 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
           }
 
           return {
+            garmentId: result.garmentId,
             name: file.name,
             src: result.cleanUrl,
             status: "ready",
@@ -195,6 +200,39 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
       },
       ...current
     ]);
+  };
+
+  const handleHqRender = ({ blob, createdAt, src: previewSrc }: { blob?: Blob; createdAt: string; src: string }) => {
+    const garmentId = garmentAsset?.garmentId;
+    if (!blob || !garmentId) {
+      // Fallback: no backend garment ID (e.g. background removal failed/skipped) -
+      // just save the raw canvas frame like a regular capture.
+      handleCapture({ createdAt, src: previewSrc });
+      return;
+    }
+
+    setIsRendering(true);
+
+    createRealisticRender(blob, garmentId)
+      .then((result) => {
+        setSavedLooks((current) => [
+          {
+            createdAt,
+            id: `hq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            isHqRender: true,
+            src: result.resultUrl
+          },
+          ...current
+        ]);
+        goToStep(4);
+      })
+      .catch(() => {
+        // Backend render failed - fall back to the canvas preview snapshot.
+        handleCapture({ createdAt, src: previewSrc });
+      })
+      .finally(() => {
+        setIsRendering(false);
+      });
   };
 
   const removeSavedLook = (id: string) => {
@@ -441,7 +479,12 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
                     />
                     <div className="saved-look-card__meta">
                       <div>
-                        <strong>Look {String(index + 1).padStart(2, "0")}</strong>
+                        <strong>
+                          Look {String(index + 1).padStart(2, "0")}
+                          {savedLook.isHqRender ? (
+                            <span className="pill pill--accent" style={{ marginLeft: "6px", fontSize: "10px", padding: "2px 6px" }}>HQ</span>
+                          ) : null}
+                        </strong>
                         <span>{savedLook.createdAt}</span>
                       </div>
                       <div className="saved-look-card__actions">
@@ -483,9 +526,12 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
         <article className="panel panel--camera">
           <CameraPreview
             fitAdjustments={fitAdjustments}
+            garmentId={garmentAsset?.garmentId}
             garmentName={garmentAsset?.name ?? null}
             garmentSrc={garmentAsset?.src ?? null}
+            isRendering={isRendering}
             onCapture={handleCapture}
+            onHqRender={handleHqRender}
             useNaturalGarmentShape={garmentAsset?.status === "ready"}
           />
         </article>
