@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -19,6 +19,14 @@ app.mount(
     f"{settings.data_url_prefix}/garments",
     StaticFiles(directory=settings.garments_dir),
     name="garment-assets",
+)
+
+renders_dir = settings.data_dir / "renders"
+renders_dir.mkdir(parents=True, exist_ok=True)
+app.mount(
+    f"{settings.data_url_prefix}/renders",
+    StaticFiles(directory=renders_dir),
+    name="render-assets",
 )
 
 app.include_router(health.router)
