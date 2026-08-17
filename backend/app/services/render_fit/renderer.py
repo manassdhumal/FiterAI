@@ -35,107 +35,125 @@ def _build_control_points(
     garment_w: int,
     garment_h: int,
     padding_frac: float = 0.10,
+    category: str = "t-shirt",
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """
     Derives ~10 body-surface control points from MediaPipe pose landmarks and
     returns matching (source_pts, target_pts) pairs for the TPS warp.
-
-    Source points sample the garment's own flat canvas; target points are the
-    corresponding positions on the person image canvas.  Any landmark pair that
-    can't be resolved (low visibility or absent) is skipped so the TPS still
-    has a valid, if sparser, set to work with.
-
-    Garment anatomy columns (in source space):
-      left  ← person's LEFT side  (MediaPipe's LEFT_*)
-      right ← person's RIGHT side (MediaPipe's RIGHT_*)
-    Mirror note: MediaPipe LEFT/RIGHT follow the *person's* body, not the
-    viewer's left/right.
     """
-    # Resolve key landmarks (all normalized 0–1).
+    # Resolve key landmarks
     l_shoulder = _lm(lm_dict, "LEFT_SHOULDER")
     r_shoulder = _lm(lm_dict, "RIGHT_SHOULDER")
     l_hip = _lm(lm_dict, "LEFT_HIP")
     r_hip = _lm(lm_dict, "RIGHT_HIP")
     l_elbow = _lm(lm_dict, "LEFT_ELBOW")
     r_elbow = _lm(lm_dict, "RIGHT_ELBOW")
+    l_knee = _lm(lm_dict, "LEFT_KNEE")
+    r_knee = _lm(lm_dict, "RIGHT_KNEE")
+    l_ankle = _lm(lm_dict, "LEFT_ANKLE")
+    r_ankle = _lm(lm_dict, "RIGHT_ANKLE")
 
-    # Derived points.
-    neck = _mid(l_shoulder, r_shoulder)
-    # Bring the neck point up slightly — the neckline sits above the shoulder midpoint.
-    if neck and l_shoulder and r_shoulder:
-        shoulder_span_y = abs((l_shoulder[1] + r_shoulder[1]) / 2)
-        neck = (neck[0], neck[1] - 0.04)
-
-    waist = _mid(
-        _lerp(l_shoulder, l_hip, 0.65),
-        _lerp(r_shoulder, r_hip, 0.65),
-    )
-    hem = _mid(l_hip, r_hip)
-
-    # "Armpit" approximation: halfway between shoulder and elbow, at shoulder y.
-    l_armpit = _mid(l_shoulder, l_elbow)
-    if l_armpit and l_shoulder:
-        l_armpit = (l_armpit[0], l_shoulder[1] + 0.03)
-    r_armpit = _mid(r_shoulder, r_elbow)
-    if r_armpit and r_shoulder:
-        r_armpit = (r_armpit[0], r_shoulder[1] + 0.03)
-
-    # Chest center — between neck and waist, horizontally centred.
-    chest = _lerp(neck, waist, 0.4) if neck and waist else None
-
-    # Waist sides.
-    l_waist_side = _lerp(l_shoulder, l_hip, 0.65) if l_shoulder and l_hip else None
-    r_waist_side = _lerp(r_shoulder, r_hip, 0.65) if r_shoulder and r_hip else None
-
-    # Convert normalised landmark coords → pixel coords on the person canvas.
     def to_person(pt: tuple[float, float] | None) -> tuple[float, float] | None:
         if pt is None:
             return None
         return (pt[0] * width, pt[1] * height)
 
-    # ── Garment source point layout ─────────────────────────────────────────
-    # The garment is a flat image with the garment centred.  We approximate
-    # its anatomy with a regular grid anchored by padding_frac insets:
-    #
-    #   col:  left edge  centre  right edge
-    #   row:  neck       chest   waist      hem
-    #
     px = padding_frac
     py = padding_frac
     gw, gh = garment_w, garment_h
 
-    # Column x positions in garment space (person's right → garment left for mirrored cameras;
-    # but garment product shots are typically "facing camera" so LEFT_SHOULDER maps to garment right col).
     g_left = gw * px
     g_center = gw * 0.5
     g_right = gw * (1 - px)
+    
+    pairs = []
 
-    # Row y positions in garment space.
-    g_neck = gh * py
-    g_chest = gh * 0.35
-    g_waist = gh * 0.65
-    g_hem = gh * (1 - py)
+    if category in ["pants", "shorts", "skirt"]:
+        # Bottom wear logic
+        waist_l = _lerp(l_shoulder, l_hip, 0.7) if l_shoulder and l_hip else l_hip
+        waist_r = _lerp(r_shoulder, r_hip, 0.7) if r_shoulder and r_hip else r_hip
+        waist_mid = _mid(waist_l, waist_r)
+        
+        pelvis_mid = _mid(l_hip, r_hip)
+        
+        # Depending on shorts vs pants, hem is knee vs ankle
+        if category in ["shorts", "skirt"]:
+            hem_l = _lerp(l_hip, l_knee, 0.6) if l_hip and l_knee else None
+            hem_r = _lerp(r_hip, r_knee, 0.6) if r_hip and r_knee else None
+        else:
+            hem_l = l_ankle
+            hem_r = r_ankle
+            
+        hem_mid = _mid(hem_l, hem_r)
 
-    # Build correspondence list: (garment_src, person_dst).
-    pairs: list[tuple[tuple[float, float], tuple[float, float] | None]] = [
-        # Neck / collar
-        ((g_center, g_neck),       to_person(neck)),
-        # Shoulders
-        ((g_right,  g_neck + (g_chest - g_neck) * 0.3), to_person(r_shoulder)),
-        ((g_left,   g_neck + (g_chest - g_neck) * 0.3), to_person(l_shoulder)),
-        # Armpits
-        ((g_right,  g_chest),      to_person(r_armpit)),
-        ((g_left,   g_chest),      to_person(l_armpit)),
-        # Chest center
-        ((g_center, g_chest),      to_person(chest)),
-        # Waist sides
-        ((g_right,  g_waist),      to_person(r_waist_side)),
-        ((g_left,   g_waist),      to_person(l_waist_side)),
-        # Hem / hips
-        ((g_right,  g_hem),        to_person(r_hip)),
-        ((g_left,   g_hem),        to_person(l_hip)),
-        ((g_center, g_hem),        to_person(hem)),
-    ]
+        g_waist = gh * py
+        g_pelvis = gh * 0.4
+        g_hem = gh * (1 - py)
+
+        pairs = [
+            ((g_left, g_waist), to_person(waist_l)),
+            ((g_right, g_waist), to_person(waist_r)),
+            ((g_center, g_waist), to_person(waist_mid)),
+            ((g_left, g_pelvis), to_person(l_hip)),
+            ((g_right, g_pelvis), to_person(r_hip)),
+            ((g_center, g_pelvis), to_person(pelvis_mid)),
+            ((g_left, g_hem), to_person(hem_l)),
+            ((g_right, g_hem), to_person(hem_r)),
+            ((g_center, g_hem), to_person(hem_mid)),
+        ]
+    else:
+        # Top wear logic
+        neck = _mid(l_shoulder, r_shoulder)
+        if neck and l_shoulder and r_shoulder:
+            neck = (neck[0], neck[1] - 0.04)
+
+        waist = _mid(_lerp(l_shoulder, l_hip, 0.65), _lerp(r_shoulder, r_hip, 0.65))
+        hem = _mid(l_hip, r_hip)
+
+        # Drop the hem slightly for jackets
+        if category in ["jacket", "sweater"] and hem:
+            hem = (hem[0], hem[1] + 0.05)
+            if l_hip: l_hip = (l_hip[0], l_hip[1] + 0.05)
+            if r_hip: r_hip = (r_hip[0], r_hip[1] + 0.05)
+
+        l_armpit = _mid(l_shoulder, l_elbow)
+        if l_armpit and l_shoulder:
+            # Widen armpits for looser fits
+            offset_x = 0.03 if category in ["jacket", "sweater"] else 0.0
+            l_armpit = (l_armpit[0] + offset_x, l_shoulder[1] + 0.03)
+            
+        r_armpit = _mid(r_shoulder, r_elbow)
+        if r_armpit and r_shoulder:
+            offset_x = -0.03 if category in ["jacket", "sweater"] else 0.0
+            r_armpit = (r_armpit[0] + offset_x, r_shoulder[1] + 0.03)
+
+        chest = _lerp(neck, waist, 0.4) if neck and waist else None
+        
+        l_waist_side = _lerp(l_shoulder, l_hip, 0.65) if l_shoulder and l_hip else None
+        r_waist_side = _lerp(r_shoulder, r_hip, 0.65) if r_shoulder and r_hip else None
+
+        if category in ["jacket", "sweater"]:
+            if l_waist_side: l_waist_side = (l_waist_side[0] + 0.03, l_waist_side[1])
+            if r_waist_side: r_waist_side = (r_waist_side[0] - 0.03, r_waist_side[1])
+
+        g_neck = gh * py
+        g_chest = gh * 0.35
+        g_waist = gh * 0.65
+        g_hem = gh * (1 - py)
+
+        pairs = [
+            ((g_center, g_neck),       to_person(neck)),
+            ((g_right,  g_neck + (g_chest - g_neck) * 0.3), to_person(r_shoulder)),
+            ((g_left,   g_neck + (g_chest - g_neck) * 0.3), to_person(l_shoulder)),
+            ((g_right,  g_chest),      to_person(r_armpit)),
+            ((g_left,   g_chest),      to_person(l_armpit)),
+            ((g_center, g_chest),      to_person(chest)),
+            ((g_right,  g_waist),      to_person(r_waist_side)),
+            ((g_left,   g_waist),      to_person(l_waist_side)),
+            ((g_right,  g_hem),        to_person(r_hip)),
+            ((g_left,   g_hem),        to_person(l_hip)),
+            ((g_center, g_hem),        to_person(hem)),
+        ]
 
     src_pts: list[tuple[float, float]] = []
     dst_pts: list[tuple[float, float]] = []
@@ -172,8 +190,20 @@ def generate_realistic_fit(person_image: Image.Image, garment_id: str) -> Image.
     width, height = person_image.size
     garment_w, garment_h = garment_img.size
 
-    # 3. Build TPS control points.
-    src_pts, dst_pts = _build_control_points(lm_dict, width, height, garment_w, garment_h)
+    # 3. Read category from metadata.json if it exists.
+    import json
+    metadata_path = settings.garments_dir / garment_id / "metadata.json"
+    category = "t-shirt" # Default
+    if metadata_path.exists():
+        try:
+            with open(metadata_path, "r") as f:
+                metadata = json.load(f)
+                category = metadata.get("category", category)
+        except Exception:
+            pass
+
+    # 4. Build TPS control points.
+    src_pts, dst_pts = _build_control_points(lm_dict, width, height, garment_w, garment_h, category=category)
 
     if len(src_pts) < 4:
         raise ValueError(

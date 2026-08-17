@@ -74,6 +74,11 @@ def process_garment_upload(raw_bytes: bytes, original_filename: str) -> GarmentI
 
     category = classify_garment(clean_image)
 
+    import json
+    metadata = {"category": category}
+    with open(garment_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f)
+
     return GarmentIntakeResult(
         garment_id=garment_id,
         original_filename=original_filename,
