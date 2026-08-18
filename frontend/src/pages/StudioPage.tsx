@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import { CameraPreview } from "../components/CameraPreview";
-import { DownloadIcon, GalleryIcon, MoonIcon, SunIcon, TrashIcon, UploadIcon } from "../components/icons";
+import { DownloadIcon, GalleryIcon, MoonIcon, SunIcon, TrashIcon, UploadIcon, VideoIcon } from "../components/icons";
 import { uploadGarment } from "../lib/api/garments";
 import { createRealisticRender } from "../lib/api/renders";
 import {
@@ -83,6 +83,7 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
   const [fitAdjustments, setFitAdjustments] = useState<FitAdjustments>(defaultFitAdjustments);
   const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
   const [isRendering, setIsRendering] = useState(false);
+  const [activeSourceIndex, setActiveSourceIndex] = useState(0);
   const [step, setStep] = useState(1);
   const [maxUnlockedStep, setMaxUnlockedStep] = useState(1);
   const uploadRequestIdRef = useRef(0);
@@ -182,6 +183,48 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
 
       return null;
     });
+  };
+
+  const handleScreenCapture = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser" },
+        audio: false
+      });
+
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.autoplay = true;
+      video.muted = true;
+
+      await new Promise((resolve) => {
+        video.onplaying = resolve;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      
+      if (!ctx) {
+        throw new Error("Could not get canvas context");
+      }
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Stop all tracks immediately to respect privacy
+      stream.getTracks().forEach((track) => track.stop());
+
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const file = new File([blob], "screen_capture.png", { type: "image/png" });
+        // Create a synthetic event to reuse handleGarmentChange
+        handleGarmentChange({ target: { files: [file] } } as unknown as ChangeEvent<HTMLInputElement>);
+      }, "image/png");
+
+    } catch (error) {
+      console.error("Screen capture failed:", error);
+    }
   };
 
   const updateFitAdjustment = (key: keyof FitAdjustments, value: number) => {
@@ -309,16 +352,40 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
             </div>
 
             {!garmentAsset ? (
-              <label className="upload-dropzone">
-                <span className="upload-dropzone__icon">
-                  <UploadIcon />
-                </span>
-                <span>
-                  <strong>Drop garment here</strong>
-                  <small>or click to browse · PNG, JPG</small>
-                </span>
-                <input type="file" accept="image/*" onChange={handleGarmentChange} />
-              </label>
+              activeSourceIndex === 2 || activeSourceIndex === 3 ? (
+                <div className="upload-dropzone" style={{ flexDirection: "column", gap: "16px", cursor: "default" }}>
+                  <span className="upload-dropzone__icon">
+                    <VideoIcon />
+                  </span>
+                  <div style={{ textAlign: "center" }}>
+                    <strong>Select a window to capture</strong>
+                    <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
+                      Open a product page in another tab or window, then click capture.
+                    </p>
+                  </div>
+                  <button type="button" onClick={() => void handleScreenCapture()}>
+                    Capture Window
+                  </button>
+                </div>
+              ) : activeSourceIndex === 0 ? (
+                <label className="upload-dropzone">
+                  <span className="upload-dropzone__icon">
+                    <UploadIcon />
+                  </span>
+                  <span>
+                    <strong>Drop garment here</strong>
+                    <small>or click to browse · PNG, JPG</small>
+                  </span>
+                  <input type="file" accept="image/*" onChange={handleGarmentChange} />
+                </label>
+              ) : (
+                <div className="upload-dropzone" style={{ cursor: "default" }}>
+                  <span>
+                    <strong>Coming soon</strong>
+                    <small>This intake method is not yet implemented.</small>
+                  </span>
+                </div>
+              )
             ) : (
               <div className="garment-preview">
                 <div className="garment-preview__frame">
@@ -343,7 +410,12 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
 
             <ul className="source-tags">
               {garmentSources.map((source, index) => (
-                <li key={source} className={index === 0 ? "source-tag source-tag--active" : "source-tag"}>
+                <li 
+                  key={source} 
+                  className={index === activeSourceIndex ? "source-tag source-tag--active" : "source-tag"}
+                  onClick={() => setActiveSourceIndex(index)}
+                  style={{ cursor: "pointer" }}
+                >
                   {source}
                 </li>
               ))}
