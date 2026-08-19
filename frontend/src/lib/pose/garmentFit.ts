@@ -102,28 +102,101 @@ function rotatePoint(point: Point, center: Point, radians: number): Point {
   };
 }
 
-export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null {
-  const leftShoulderRaw = byId(frame, "leftShoulder");
-  const rightShoulderRaw = byId(frame, "rightShoulder");
+export function calculateTorsoFitRegion(frame: PoseFrame, category?: string): TorsoFitRegion | null {
+  const isBottoms = category && ["pants", "shorts", "skirt"].includes(category);
+  const isShortsOrSkirt = category === "shorts" || category === "skirt";
+  const isLooserTop = category && ["jacket", "sweater"].includes(category);
+
   const leftHipRaw = byId(frame, "leftHip");
   const rightHipRaw = byId(frame, "rightHip");
+  const leftShoulderRaw = byId(frame, "leftShoulder");
+  const rightShoulderRaw = byId(frame, "rightShoulder");
   const leftElbowRaw = byId(frame, "leftElbow");
   const rightElbowRaw = byId(frame, "rightElbow");
 
+  if (isBottoms) {
+    if (!leftHipRaw || !rightHipRaw) {
+      return null;
+    }
+    
+    const leftKneeRaw = byId(frame, "leftKnee");
+    const rightKneeRaw = byId(frame, "rightKnee");
+    const leftAnkleRaw = byId(frame, "leftAnkle");
+    const rightAnkleRaw = byId(frame, "rightAnkle");
+
+    const facesScreenNormally = rightHipRaw.x >= leftHipRaw.x;
+    const leftHip = facesScreenNormally ? leftHipRaw : rightHipRaw;
+    const rightHip = facesScreenNormally ? rightHipRaw : leftHipRaw;
+    const leftKnee = facesScreenNormally ? leftKneeRaw : rightKneeRaw;
+    const rightKnee = facesScreenNormally ? rightKneeRaw : leftKneeRaw;
+    const leftAnkle = facesScreenNormally ? leftAnkleRaw : rightAnkleRaw;
+    const rightAnkle = facesScreenNormally ? rightAnkleRaw : leftAnkleRaw;
+
+    const leftShoulder = leftShoulderRaw && rightShoulderRaw ? (facesScreenNormally ? leftShoulderRaw : rightShoulderRaw) : null;
+    const rightShoulder = leftShoulderRaw && rightShoulderRaw ? (facesScreenNormally ? rightShoulderRaw : leftShoulderRaw) : null;
+
+    let waistLeft: Point;
+    let waistRight: Point;
+
+    if (leftShoulder && rightShoulder) {
+      // waist is slightly above hip, towards shoulder
+      waistLeft = {
+        x: leftHip.x + (leftShoulder.x - leftHip.x) * 0.15,
+        y: leftHip.y + (leftShoulder.y - leftHip.y) * 0.15
+      };
+      waistRight = {
+        x: rightHip.x + (rightShoulder.x - rightHip.x) * 0.15,
+        y: rightHip.y + (rightShoulder.y - rightHip.y) * 0.15
+      };
+    } else {
+      // Guess waist location based on hip width
+      const hipWidth = Math.abs(rightHip.x - leftHip.x);
+      waistLeft = { x: leftHip.x, y: leftHip.y - hipWidth * 0.35 };
+      waistRight = { x: rightHip.x, y: rightHip.y - hipWidth * 0.35 };
+    }
+
+    let kneeL = leftKnee ? { x: leftKnee.x, y: leftKnee.y } : { x: leftHip.x, y: leftHip.y + 0.3 };
+    let kneeR = rightKnee ? { x: rightKnee.x, y: rightKnee.y } : { x: rightHip.x, y: rightHip.y + 0.3 };
+    let ankleL = leftAnkle ? { x: leftAnkle.x, y: leftAnkle.y } : { x: kneeL.x, y: kneeL.y + 0.3 };
+    let ankleR = rightAnkle ? { x: rightAnkle.x, y: rightAnkle.y } : { x: kneeR.x, y: kneeR.y + 0.3 };
+
+    if (isShortsOrSkirt) {
+      // Cut off at knee
+      ankleL = { x: leftHip.x + (kneeL.x - leftHip.x) * 0.8, y: leftHip.y + (kneeL.y - leftHip.y) * 0.8 };
+      ankleR = { x: rightHip.x + (kneeR.x - rightHip.x) * 0.8, y: rightHip.y + (kneeR.y - rightHip.y) * 0.8 };
+      kneeL = { x: leftHip.x + (kneeL.x - leftHip.x) * 0.45, y: leftHip.y + (kneeL.y - leftHip.y) * 0.45 };
+      kneeR = { x: rightHip.x + (kneeR.x - rightHip.x) * 0.45, y: rightHip.y + (kneeR.y - rightHip.y) * 0.45 };
+    }
+
+    const hemL = { x: ankleL.x, y: ankleL.y + 0.05 };
+    const hemR = { x: ankleR.x, y: ankleR.y + 0.05 };
+
+    const width = Math.max(0.1, Math.abs(rightHip.x - leftHip.x));
+    const height = Math.max(0.1, Math.max(ankleL.y, ankleR.y) - waistLeft.y);
+
+    return {
+      centerX: (leftHip.x + rightHip.x) / 2,
+      height,
+      width,
+      // Map bottoms landmarks to the 10-point mesh guide structure
+      neckLeft: waistLeft,
+      neckRight: waistRight,
+      leftShoulder: { x: leftHip.x, y: leftHip.y },
+      rightShoulder: { x: rightHip.x, y: rightHip.y },
+      sleeveLeft: kneeL,
+      sleeveRight: kneeR,
+      waistLeft: ankleL,
+      waistRight: ankleR,
+      hipLeft: hemL,
+      hipRight: hemR
+    };
+  }
+
+  // Top wear logic
   if (!leftShoulderRaw || !rightShoulderRaw || !leftHipRaw || !rightHipRaw) {
     return null;
   }
 
-  // MediaPipe's left/right landmarks are the subject's own anatomical
-  // sides, which land on opposite sides of the raw camera frame depending
-  // on whether the person is facing the camera or has turned around (a
-  // person facing the camera has their anatomical right shoulder appear on
-  // the smaller-x side of the frame, like any normal, unmirrored photo of
-  // someone facing you). Everything below assumes screen-space left/right
-  // (smaller x = left) instead, so landmarks are normalized to that before
-  // use - without this, shoulderWidth goes negative and this whole function
-  // fails silently for anyone facing the camera normally (the common case),
-  // only "working" by coincidence when facing away.
   const facesScreenNormally = rightShoulderRaw.x >= leftShoulderRaw.x;
   const leftShoulder = facesScreenNormally ? leftShoulderRaw : rightShoulderRaw;
   const rightShoulder = facesScreenNormally ? rightShoulderRaw : leftShoulderRaw;
@@ -139,17 +212,6 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
     return null;
   }
 
-  // Turning toward profile relative to the camera foreshortens the 2D
-  // shoulder-to-shoulder (and hip-to-hip) projection toward zero even though
-  // the person hasn't actually gotten narrower - torsoHeight barely changes
-  // under yaw rotation, only width does. A flat front-view garment image
-  // warped by a mesh keyed directly to that width has no real depth to fall
-  // back on, so an unclamped width collapses the whole garment to a
-  // near-invisible sliver mid-turn instead of just narrowing it. Floor both
-  // widths to the same minimum, derived from typical shoulder-width/torso-
-  // height body proportions, so a turn still visibly narrows the garment but
-  // can't erase it - and floors shoulder/hip together so the taper between
-  // them stays consistent instead of one collapsing while the other doesn't.
   const MIN_WIDTH_TO_HEIGHT_RATIO = 0.35;
   const minHalfWidth = (torsoHeight * MIN_WIDTH_TO_HEIGHT_RATIO) / 2;
   const shoulderWidth = Math.max(rawShoulderWidth, minHalfWidth * 2);
@@ -159,54 +221,35 @@ export function calculateTorsoFitRegion(frame: PoseFrame): TorsoFitRegion | null
   const sleeveReach = shoulderWidth * 0.28;
   const neckInset = shoulderWidth * 0.18;
 
-  // Live-tested feedback (collar sits too low, shoulders too narrow and too
-  // low, waist still too tight and sits too high) pointed at these four
-  // constants specifically - each tuned in the reported direction rather
-  // than guessed blind:
-  // - collar was only rising 2x shoulderLift (0.12*torsoHeight) above the
-  //   shoulder line; raised further on its own constant.
-  // - the shoulder row was pushed DOWN from the raw landmark, when it
-  //   needed to sit AT/above it instead - and widened further (was too
-  //   narrow even after the existing +8%/side outset).
-  // - the waist row's upward offset from the hip line (0.18*torsoHeight)
-  //   put it too far above the real hip; brought much closer to the hip
-  //   line, and the hip width it interpolates toward now includes a
-  //   drape-ease margin since even matching the real hip width read as
-  //   too tight (a T-shirt hangs with some slack, it doesn't cling).
   const neckRise = torsoHeight * 0.16;
-  const shoulderOutset = shoulderWidth * 0.14;
+  const shoulderOutset = shoulderWidth * (isLooserTop ? 0.18 : 0.14); // Wider for jacket/sweater
   const shoulderRise = torsoHeight * 0.03;
   const shoulderRowHalfWidth = shoulderWidth / 2 + shoulderOutset;
-  const waistEase = 1.18;
+  const waistEase = isLooserTop ? 1.25 : 1.18; // Looser fit for jacket/sweater
   const hipHalfWidth = Math.max((Math.abs(rightHip.x - leftHip.x) / 2) * waistEase, minHalfWidth);
 
-  // Interpolate the waist row's half-width between the shoulder row and the
-  // (eased) hip half-width, following garmentMeshRowSourceFractions' own
-  // [shoulder=0.11, hip=1] positions, so the taper follows the body's own
-  // proportions instead of a fixed, body-agnostic guess.
   const waistT = (0.83 - 0.11) / (1 - 0.11);
   const waistHalfWidth = lerp(shoulderRowHalfWidth, hipHalfWidth, waistT);
   const waistDrop = torsoHeight * 0.06;
   const waistY = { left: leftHip.y - waistDrop, right: rightHip.y - waistDrop };
 
-  // Same width-floor reasoning as shoulderWidth above, applied to the raw hip
-  // line: only pushes each side outward from its own real position (leaving
-  // normal, non-degenerate hip width untouched, preserving the earlier
-  // hourglass-pinch fix below) when the raw span has collapsed under a
-  // profile turn.
   const rawHipHalfWidth = Math.abs(rightHip.x - leftHip.x) / 2;
   const hipOutset = Math.max(0, minHalfWidth - rawHipHalfWidth);
 
-  // Each row keeps its own left/right landmark Y instead of collapsing to a
-  // shared min/max, so real shoulder/hip tilt reaches the mesh-warp rows
-  // (buildGarmentGuidePoints) instead of being flattened out.
+  let targetLeftHip = { x: leftHip.x - hipOutset, y: leftHip.y };
+  let targetRightHip = { x: rightHip.x + hipOutset, y: rightHip.y };
+
+  if (isLooserTop) {
+    // Drop hem slightly for jacket/sweater
+    targetLeftHip.y += torsoHeight * 0.05;
+    targetRightHip.y += torsoHeight * 0.05;
+  }
+
   return {
     centerX,
     height: torsoHeight,
-    // No inward inset on the hip line - it previously narrowed the hem
-    // inside the person's real hip width, compounding the pinch above.
-    hipLeft: { x: leftHip.x - hipOutset, y: leftHip.y },
-    hipRight: { x: rightHip.x + hipOutset, y: rightHip.y },
+    hipLeft: targetLeftHip,
+    hipRight: targetRightHip,
     leftShoulder: { x: leftShoulder.x - shoulderOutset, y: leftShoulder.y - shoulderRise },
     neckLeft: { x: centerX - neckInset, y: leftShoulder.y - neckRise },
     neckRight: { x: centerX + neckInset, y: rightShoulder.y - neckRise },
@@ -242,9 +285,10 @@ export function buildGarmentGuidePoints(region: TorsoFitRegion): Point[] {
 
 export function createGarmentPlacement(
   frame: PoseFrame,
-  adjustments: FitAdjustments
+  adjustments: FitAdjustments,
+  category?: string
 ): GarmentPlacement | null {
-  const fitRegion = calculateTorsoFitRegion(frame);
+  const fitRegion = calculateTorsoFitRegion(frame, category);
 
   if (!fitRegion) {
     return null;

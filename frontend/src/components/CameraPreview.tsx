@@ -19,6 +19,7 @@ type CameraPreviewProps = {
   garmentId?: string;
   garmentName: string | null;
   garmentSrc: string | null;
+  category?: string;
   onCapture: (snapshot: SnapshotPayload) => void;
   onHqRender?: (snapshot: SnapshotPayload) => void;
   isRendering?: boolean;
@@ -44,6 +45,7 @@ export function CameraPreview({
   garmentId,
   garmentName,
   garmentSrc,
+  category,
   isRendering,
   onCapture,
   onHqRender,
@@ -63,6 +65,7 @@ export function CameraPreview({
       enabled: status === "live",
       fitAdjustments,
       garmentSrc,
+      category,
       onFrame: (frame) => {
         latestFrameRef.current = frame;
       },

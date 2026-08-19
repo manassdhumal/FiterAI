@@ -29,6 +29,7 @@ type GarmentAsset = {
   src: string;
   status: GarmentProcessingStatus;
   statusMessage: string;
+  category?: string;
 };
 
 type SavedLook = {
@@ -145,6 +146,7 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
             name: file.name,
             src: result.cleanUrl,
             status: "ready",
+            category: result.category,
             statusMessage: result.hadTransparentSource
               ? "Background already transparent. Garment normalized for fitting."
               : result.wasWornPhoto
@@ -601,6 +603,7 @@ export function StudioPage({ theme, toggleTheme }: StudioPageProps) {
             garmentId={garmentAsset?.garmentId}
             garmentName={garmentAsset?.name ?? null}
             garmentSrc={garmentAsset?.src ?? null}
+            category={garmentAsset?.category}
             isRendering={isRendering}
             onCapture={handleCapture}
             onHqRender={handleHqRender}

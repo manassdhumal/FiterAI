@@ -55,11 +55,13 @@ function lerpPoint(a: Point, b: Point, t: number): Point {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
 
-export function buildAnchorMeshRows(canvasPoints: Point[]): MeshRow[] {
+export function buildAnchorMeshRows(canvasPoints: Point[], category?: string): MeshRow[] {
+  const isBottoms = category && ["pants", "shorts", "skirt"].includes(category);
+  const fractions = isBottoms ? [0, 0.25, 0.60, 0.90, 1] : garmentMeshRowSourceFractions;
   return garmentMeshRowIndexPairs.map(([leftIdx, rightIdx], index) => ({
     left: canvasPoints[leftIdx],
     right: canvasPoints[rightIdx],
-    sourceFraction: garmentMeshRowSourceFractions[index]
+    sourceFraction: fractions[index]
   }));
 }
 
@@ -122,6 +124,7 @@ type UsePoseOverlayOptions = {
   enabled: boolean;
   fitAdjustments: FitAdjustments;
   garmentSrc: string | null;
+  category?: string;
   // Invoked once per rendered frame (in addition to this hook's own 2D
   // drawing) with the same already-smoothed PoseFrame, so a caller can reuse
   // pose detection (e.g. for a capture-time HQ render) without running it
@@ -754,9 +757,10 @@ function drawGarmentImage(
   segmentationBuffers: SegmentationBuffers | null,
   garmentBounds: GarmentBounds | null,
   video: HTMLVideoElement,
-  lightingCanvas: HTMLCanvasElement
+  lightingCanvas: HTMLCanvasElement,
+  category?: string
 ): boolean {
-  const placement = createGarmentPlacement(frame, fitAdjustments);
+  const placement = createGarmentPlacement(frame, fitAdjustments, category);
 
   if (!placement) {
     return false;
@@ -823,7 +827,7 @@ function drawGarmentImage(
       // real per-row body width, so the garment's internal contour follows
       // real body curvature instead of linearly interpolating across large
       // gaps between a few sparse landmark-derived anchors.
-      const denseRows = densifyMeshRows(buildAnchorMeshRows(canvasPoints), DENSE_ROW_SUBDIVISIONS_PER_GAP);
+      const denseRows = densifyMeshRows(buildAnchorMeshRows(canvasPoints, category), DENSE_ROW_SUBDIVISIONS_PER_GAP);
       const meshRows = refineMeshRowsFromSegmentation(
         denseRows,
         segmentationMask,
@@ -867,7 +871,7 @@ function drawGarmentImage(
     }
   }
 
-  paintMeshWarpedGarment(context, garmentImage, buildAnchorMeshRows(canvasPoints), garmentBounds, 0.92);
+  paintMeshWarpedGarment(context, garmentImage, buildAnchorMeshRows(canvasPoints, category), garmentBounds, 0.92);
   return true;
 }
 
@@ -880,7 +884,8 @@ function drawPoseFrame(
   useNaturalGarmentShape: boolean,
   segmentationBuffers: SegmentationBuffers | null,
   garmentBounds: GarmentBounds | null,
-  lightingCanvas: HTMLCanvasElement
+  lightingCanvas: HTMLCanvasElement,
+  category?: string
 ) {
   const sourceWidth = video.videoWidth || video.clientWidth || 1;
   const sourceHeight = video.videoHeight || video.clientHeight || 1;
@@ -909,7 +914,8 @@ function drawPoseFrame(
         segmentationBuffers,
         garmentBounds,
         video,
-        lightingCanvas
+        lightingCanvas,
+        category
       )
     : false;
 
@@ -940,6 +946,7 @@ export function usePoseOverlay({
   enabled,
   fitAdjustments,
   garmentSrc,
+  category,
   onFrame,
   useNaturalGarmentShape,
   videoRef
@@ -1130,7 +1137,8 @@ export function usePoseOverlay({
             maskCanvas: maskCanvasRef.current
           },
           garmentBoundsRef.current,
-          lightingCanvasRef.current
+          lightingCanvasRef.current,
+          category
         );
       } else {
         landmarkHistoryRef.current = null;
@@ -1150,7 +1158,7 @@ export function usePoseOverlay({
       const context = canvas?.getContext("2d");
       context?.clearRect(0, 0, canvas?.width ?? 0, canvas?.height ?? 0);
     };
-  }, [enabled, fitAdjustments, useNaturalGarmentShape, videoRef]);
+  }, [enabled, fitAdjustments, useNaturalGarmentShape, videoRef, category]);
 
   return {
     canvasRef,
