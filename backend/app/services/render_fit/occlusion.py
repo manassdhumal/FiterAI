@@ -1,6 +1,15 @@
+import threading
 import cv2
+import mediapipe as mp
 import numpy as np
 from PIL import Image
+
+_thread_local = threading.local()
+
+def _get_segmenter():
+    if not hasattr(_thread_local, "segmenter"):
+        _thread_local.segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=1)
+    return _thread_local.segmenter
 
 
 # Half-width of the arm mask polygon as a fraction of the image width.
@@ -34,6 +43,8 @@ def _draw_arm_mask(
     shoulder = get_pt("SHOULDER")
     elbow    = get_pt("ELBOW")
     wrist    = get_pt("WRIST")
+    index    = get_pt("INDEX")
+    pinky    = get_pt("PINKY")
 
     # Build segment list: at minimum we need shoulder + one more point.
     pts_chain: list[np.ndarray] = []
@@ -43,6 +54,10 @@ def _draw_arm_mask(
         pts_chain.append(elbow)
     if wrist is not None:
         pts_chain.append(wrist)
+        
+    if index is not None and pinky is not None:
+        hand_mid = (index + pinky) / 2.0
+        pts_chain.append(hand_mid)
 
     if len(pts_chain) < 2:
         return  # Not enough landmarks — skip this arm.
@@ -72,6 +87,51 @@ def _draw_arm_mask(
             cv2.circle(mask, (int(center[0]), int(center[1])), int(half_w), 255, -1)
 
 
+def _draw_head_neck_mask(
+    mask: np.ndarray,
+    lm_dict: dict,
+    img_w: int,
+    img_h: int,
+) -> None:
+    """
+    Draws a polygon covering the face and neck to prevent high collars from bleeding over.
+    """
+    def get_pt(name: str) -> np.ndarray | None:
+        lm = lm_dict.get(name)
+        if lm is None or lm.get("visibility", 0) < 0.35:
+            return None
+        return np.array([lm["x"] * img_w, lm["y"] * img_h], dtype=np.float32)
+
+    l_ear = get_pt("LEFT_EAR")
+    r_ear = get_pt("RIGHT_EAR")
+    nose = get_pt("NOSE")
+    l_shoulder = get_pt("LEFT_SHOULDER")
+    r_shoulder = get_pt("RIGHT_SHOULDER")
+
+    if not (l_ear is not None and r_ear is not None and nose is not None):
+        return
+
+    # Use the distance between ears to define a radius for the head
+    head_width = np.linalg.norm(r_ear - l_ear)
+    radius = int(head_width * 0.8)
+
+    # Draw a circle for the head
+    cv2.circle(mask, (int(nose[0]), int(nose[1])), radius, 255, -1)
+
+    # Draw a polygon for the neck connecting the head to slightly above the shoulders
+    if l_shoulder is not None and r_shoulder is not None:
+        neck_left = nose + (l_shoulder - nose) * 0.6
+        neck_right = nose + (r_shoulder - nose) * 0.6
+        
+        quad = np.array([
+            l_ear,
+            r_ear,
+            neck_right,
+            neck_left,
+        ], dtype=np.int32)
+        cv2.fillPoly(mask, [quad], color=255)
+
+
 def apply_occlusion(
     warped_garment: Image.Image,
     person_image: Image.Image,
@@ -88,31 +148,32 @@ def apply_occlusion(
          in front of the garment, not hidden under it.
       3. Composite: person → garment (clipped) → final RGBA.
     """
-    import mediapipe as mp
-
     img_w, img_h = person_image.size
     person_rgb = np.array(person_image.convert("RGB"))
 
     # ── 1. Body silhouette via Selfie Segmentation ──────────────────────────
-    mp_seg = mp.solutions.selfie_segmentation
-    with mp_seg.SelfieSegmentation(model_selection=1) as seg:
-        seg_result = seg.process(person_rgb)
+    seg = _get_segmenter()
+    # To process an image it needs to be RGB (or use process directly)
+    seg_result = seg.process(person_rgb)
 
     # segmentation_mask: float32, 1.0 = person, 0.0 = background
     body_mask_f = seg_result.segmentation_mask  # shape (H, W)
-    # Soft threshold → hard binary mask (uint8, 0 or 255)
-    body_mask = (body_mask_f > 0.5).astype(np.uint8) * 255
-    # Slight morphological close to fill small holes at garment/skin boundary.
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
+    # Soft edge blending (feathered mask) for realistic composite
+    body_mask = (body_mask_f * 255).astype(np.uint8)
+    body_mask = cv2.GaussianBlur(body_mask, (7, 7), 0)
 
     # ── 2. Arm occlusion mask ────────────────────────────────────────────────
     arm_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    head_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    
     if lm_dict:
         _draw_arm_mask(arm_mask, lm_dict, img_w, img_h, "LEFT")
         _draw_arm_mask(arm_mask, lm_dict, img_w, img_h, "RIGHT")
-        # Smooth the arm mask edges so the transition isn't hard-edged.
+        _draw_head_neck_mask(head_mask, lm_dict, img_w, img_h)
+        
+        # Smooth the occlusion mask edges so the transition isn't hard-edged.
         arm_mask = cv2.GaussianBlur(arm_mask, (15, 15), 0)
+        head_mask = cv2.GaussianBlur(head_mask, (15, 15), 0)
 
     # ── 3. Build final garment alpha ─────────────────────────────────────────
     garment_np = np.array(warped_garment.convert("RGBA"), dtype=np.uint8)
@@ -126,6 +187,10 @@ def apply_occlusion(
     # Subtract arm regions so the person's arms appear in front.
     arm_frac = arm_mask.astype(np.float32) / 255.0
     garment_alpha = garment_alpha * (1.0 - arm_frac)
+
+    # Subtract head and neck regions.
+    head_frac = head_mask.astype(np.float32) / 255.0
+    garment_alpha = garment_alpha * (1.0 - head_frac)
 
     garment_np[:, :, 3] = np.clip(garment_alpha, 0, 255).astype(np.uint8)
 
